@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*.so
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Virtual environments
+env/
+venv/
+.env/
+.venv/
+
+# OS / editor
+.DS_Store
+
+# Large data and model artifacts (we'll keep these local / in cloud, not in Git)
+GAVD-sequences/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Logs
+logs/
+*.log
+
+

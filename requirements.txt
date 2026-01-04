@@ -1,0 +1,17 @@
+# PyTorch and CUDA should be installed via conda on Windows to avoid DLL issues.
+# Install with (example):
+#   conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+# Then install the rest of the deps with: pip install -r requirements.txt
+transformers==4.45.1
+accelerate==0.34.2
+sentencepiece==0.2.0
+protobuf==5.28.2
+einops==0.8.0
+optimum==1.23.3
+numpy==1.26.4
+Pillow==10.4.0
+huggingface_hub==0.25.2
+requests==2.32.3
+timm==1.0.9
+pandas==2.2.3
+
