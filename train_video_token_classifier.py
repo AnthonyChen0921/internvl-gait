@@ -116,15 +116,24 @@ def extract_video_features(model: nn.Module, pixel_values: torch.Tensor) -> torc
 
     B, T, C, H, W = pixel_values.shape
 
-    # Flatten batch and time so we can call extract_feature on images
-    flat = pixel_values.to(device=device, dtype=dtype).view(B * T, C, H, W)  # [B*T, 3, H, W]
+    # To avoid GPU OOM, process frames in smaller temporal chunks instead of all B*T at once
+    max_chunk_frames = 8  # process up to 8 frames per call to extract_feature
+    frame_tokens_list = []
 
-    # Use InternVL's vision encoder to get tokens per frame
     with torch.no_grad():
-        vit_tokens = model.extract_feature(flat)  # [B*T, N_tokens, D]
+        for start in range(0, T, max_chunk_frames):
+            end = min(T, start + max_chunk_frames)
+            chunk = pixel_values[:, start:end]  # [B, t, 3, H, W]
+            Bt = B * (end - start)
 
-    # First pool spatial tokens per frame (mean over patches)
-    frame_tokens = vit_tokens.mean(dim=1)  # [B*T, D]
+            flat = chunk.to(device=device, dtype=dtype).view(Bt, C, H, W)  # [B*t, 3, H, W]
+
+            vit_tokens = model.extract_feature(flat)  # [B*t, N_tokens, D]
+            # Pool spatial tokens per frame (mean over patches)
+            frame_tokens_chunk = vit_tokens.mean(dim=1)  # [B*t, D]
+            frame_tokens_list.append(frame_tokens_chunk)
+
+    frame_tokens = torch.cat(frame_tokens_list, dim=0)  # [B*T, D]
 
     # Then pool over time to obtain a video-level feature
     video_tokens = frame_tokens.view(B, T, -1)  # [B, T, D]
