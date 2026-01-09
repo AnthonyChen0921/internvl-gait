@@ -4,7 +4,7 @@ import torch.nn as nn
 
 class TemporalVideoEncoder(nn.Module):
     """
-    EVL-style temporal adapter on top of frozen InternVL vision features.
+    Simple EVL-style *encoder* adapter on top of frozen InternVL vision features.
 
     - Uses the frozen InternVL vision backbone via `base_model.extract_feature`
       to obtain one feature vector per frame.
@@ -162,4 +162,121 @@ class TemporalVideoEncoder(nn.Module):
         return video_features
 
 
+class EVLTemporalDecoder(nn.Module):
+    """
+    EVL-style *decoder* adapter that produces a small set of compact video
+    tokens q_M from per-frame InternVL vision features.
+
+    - Vision backbone (InternVL's ViT) is frozen.
+    - A learnable set of M queries attends to all frame tokens through a stack
+      of TransformerDecoder layers.
+    - The resulting compact tokens can be (1) fed directly to a classifier or
+      (2) used as visual prefix tokens for the LLM.
+    """
+
+    def __init__(
+        self,
+        base_model: nn.Module,
+        max_frames: int = 32,
+        num_queries: int = 8,
+        num_layers: int = 3,
+        num_heads: int = 4,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.base_model = base_model
+        self.base_model.requires_grad_(False)
+
+        language_model = getattr(self.base_model, "language_model", None)
+        if language_model is not None:
+            hidden_size = language_model.config.hidden_size
+            try:
+                lm_dtype = next(language_model.parameters()).dtype
+            except StopIteration:
+                lm_dtype = torch.float32
+        else:
+            hidden_size = self.base_model.config.hidden_size
+            try:
+                lm_dtype = next(self.base_model.parameters()).dtype
+            except StopIteration:
+                lm_dtype = torch.float32
+
+        self.hidden_size = hidden_size
+        self.max_frames = max_frames
+        self.num_queries = num_queries
+
+        # Learnable query tokens q_0 ... q_M-1
+        self.query_tokens = nn.Parameter(
+            torch.zeros(num_queries, hidden_size, dtype=lm_dtype)
+        )
+
+        # Optional temporal positional encoding for the memory (frame tokens)
+        self.temporal_pos_emb = nn.Parameter(
+            torch.zeros(max_frames, hidden_size, dtype=lm_dtype)
+        )
+
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=hidden_size,
+            nhead=num_heads,
+            dim_feedforward=hidden_size * 4,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.temporal_decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
+
+    def encode_images(self, pixel_values: torch.Tensor) -> torch.Tensor:
+        """
+        Encode frames into one token per frame using the frozen vision backbone.
+
+        Args:
+            pixel_values: [B, T, 3, H, W]
+
+        Returns:
+            frame_tokens: [B, T, D]
+        """
+        if pixel_values.ndim != 5:
+            raise ValueError(f"pixel_values must be [B, T, 3, H, W], got {pixel_values.shape}")
+
+        device = next(self.parameters()).device
+
+        try:
+            dtype = next(self.base_model.parameters()).dtype
+        except StopIteration:
+            dtype = torch.float32
+
+        B, T, C, H, W = pixel_values.shape
+        if T > self.max_frames:
+            raise ValueError(f"T = {T} exceeds max_frames = {self.max_frames}")
+
+        flat = pixel_values.to(device=device, dtype=dtype).view(B * T, C, H, W)
+        with torch.no_grad():
+            vit_embeds = self.base_model.extract_feature(flat)  # [B*T, N_tokens, D]
+
+        frame_tokens = vit_embeds.mean(dim=1)  # [B*T, D]
+        frame_tokens = frame_tokens.view(B, T, -1)  # [B, T, D]
+        return frame_tokens
+
+    def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            pixel_values: [B, T, 3, H, W]
+
+        Returns:
+            compact_tokens: [B, num_queries, hidden_size]  (q_M in the diagram)
+        """
+        device = next(self.parameters()).device
+        memory = self.encode_images(pixel_values)  # [B, T, D]
+        B, T, D = memory.shape
+
+        # Add temporal position encoding to memory
+        pos = self.temporal_pos_emb[:T].unsqueeze(0).to(device)  # [1, T, D]
+        memory = memory + pos
+
+        # Expand learnable queries for the batch
+        queries = self.query_tokens.unsqueeze(0).expand(B, -1, -1).to(device)  # [B, M, D]
+
+        compact_tokens = self.temporal_decoder(tgt=queries, memory=memory)  # [B, M, D]
+        return compact_tokens
 
