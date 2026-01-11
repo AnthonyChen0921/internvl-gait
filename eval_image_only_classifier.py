@@ -24,7 +24,7 @@ CKPT_PATH = "best_image_only_classifier.pt"
 STATE_PATH = "image_only_train_state.pt"
 
 
-def build_test_loader():
+def build_test_loader(batch_size: int):
     samples = collect_labeled_sequences()
     _, test_samples = video_level_train_test_split(samples, train_ratio=0.8)
 
@@ -37,7 +37,7 @@ def build_test_loader():
     )
     test_loader = torch.utils.data.DataLoader(
         test_ds,
-        batch_size=BATCH_SIZE,
+        batch_size=batch_size,
         shuffle=False,
         num_workers=0,
     )
@@ -51,7 +51,24 @@ def main():
         action="store_true",
         help="Use the last-epoch checkpoint (image_only_train_state.pt) instead of the best checkpoint.",
     )
+    parser.add_argument(
+        "--eval-batch-size",
+        type=int,
+        default=1,
+        help=(
+            "Batch size to use during evaluation. "
+            "Defaults to 1 to reduce GPU memory usage on smaller GPUs."
+        ),
+    )
     args = parser.parse_args()
+
+    eval_batch_size = max(1, args.eval_batch_size)
+    if eval_batch_size > BATCH_SIZE:
+        print(
+            f"Note: requested eval batch size {eval_batch_size} is larger than training batch size "
+            f"{BATCH_SIZE}. This may increase GPU memory usage."
+        )
+    print(f"Using eval batch size: {eval_batch_size}")
 
     # Load backbone + tokenizer
     tokenizer, base_model, _ = load_model(device=DEVICE)
@@ -86,7 +103,7 @@ def main():
         f"(epoch {ckpt.get('epoch')}, macro-F1={ckpt.get('macro_f1', 0.0) * 100:.2f}%)"
     )
 
-    test_loader = build_test_loader()
+    test_loader = build_test_loader(eval_batch_size)
     evaluate(img_model, classifier, test_loader, tokenizer, DEVICE)
 
 

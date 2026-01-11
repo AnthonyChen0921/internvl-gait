@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import torch
 from torch import nn
@@ -7,7 +7,6 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from minimal_internvl_inference import load_model
-from internvl_temporal_adapter import EVLTemporalDecoder
 from gavd_skeleton_dataset import (
     GavdSkeletonDataset,
     collect_labeled_sequences,
@@ -17,20 +16,22 @@ from gavd_skeleton_dataset import (
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-WINDOW_SIZE = 32  # number of frames per clip
+# Use 32 frames per sequence for the 1B model (as before)
+WINDOW_SIZE = 32
 BATCH_SIZE = 1
 EPOCHS = 20
 LR = 5e-4
+STATE_PATH = "internvl_original_image_text_train_state.pt"
+BEST_PATH = "best_internvl_original_image_text_classifier.pt"
 
 VIDEO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "GAVD-sequences")
-CKPT_PATH = "best_evl_compact_classifier.pt"
-STATE_PATH = "evl_compact_train_state.pt"
 
 
-def build_dataloaders():
+def build_dataloaders() -> Tuple[DataLoader, DataLoader, List[Dict]]:
     samples = collect_labeled_sequences()
     train_samples, test_samples = video_level_train_test_split(samples, train_ratio=0.8)
 
+    # Video-level summary
     train_videos = {s["video_id"] for s in train_samples}
     test_videos = {s["video_id"] for s in test_samples}
     print(f"\nTrain sequences: {len(train_samples)}")
@@ -75,23 +76,57 @@ def compute_class_weights(train_samples: List[Dict]) -> torch.Tensor:
     return weights
 
 
-def collate_fn(batch, device):
+def build_prompt() -> str:
     """
-    Each element from GavdSkeletonDataset when with_images=True is a dict:
+    Expert gait clinician prompt, same as previous experiments,
+    but we rely on InternVL's native image-text fusion instead of manual mean pooling.
+    """
+    prompt = (
+        "You are an expert gait clinician. Based on the available gait information from this video, "
+        "classify the patient's gait pattern.\n\n"
+        "Gait pattern definitions:\n"
+        "- abnormal: any gait pattern that deviates from normal but does not fit the specific patterns below.\n"
+        "- myopathic: waddling or Trendelenburg-type gait due to proximal muscle weakness.\n"
+        "- exercise: exaggerated, energetic, or performance-like gait related to sport or exercise.\n"
+        "- normal: typical, symmetric gait without obvious abnormalities.\n"
+        "- style: exaggerated or stylistic walking pattern without clear neurological or orthopedic cause.\n"
+        "- cerebral palsy: spastic, scissoring, toe-walking, or crouched gait typical of cerebral palsy.\n"
+        "- parkinsons: shuffling, stooped posture, reduced arm swing, and festination typical of Parkinson's disease.\n\n"
+        "Internally decide which class is most likely; you do not need to output the class name."
+    )
+    return prompt
+
+
+def collate_fn(batch, tokenizer, device):
+    """
+    `batch` is a dict from `GavdSkeletonDataset`:
       {
-        "skeleton": FloatTensor [W, 46],  # unused here
-        "images":   FloatTensor [W, 3, H, W],
-        "label":    int
+        'skeleton': FloatTensor [B, W, 46],  # unused here
+        'images':   FloatTensor [B, W, 3, H, W],
+        'label':    LongTensor [B]
       }
-    We keep only images and labels.
     """
-    images = batch["images"].to(device)
+    images = batch["images"].to(device)  # [B, T, 3, H, W]
     labels = batch["label"].to(device)
-    return images, labels
+
+    prompt = build_prompt()
+
+    # For InternVL, we do NOT manually insert <image> tokens here; the model's
+    # multimodal forward (via `pixel_values`) handles attaching visual tokens
+    # to the text sequence using its internal image placeholder / IMG_CONTEXT logic.
+    enc = tokenizer(prompt, return_tensors="pt")
+    input_ids = enc["input_ids"].to(device)
+    attention_mask = enc["attention_mask"].to(device)
+
+    B = images.size(0)
+    input_ids = input_ids.expand(B, -1).contiguous()
+    attention_mask = attention_mask.expand(B, -1).contiguous()
+
+    return images, labels, input_ids, attention_mask
 
 
-def evaluate(decoder, classifier, data_loader, device):
-    decoder.eval()
+def evaluate(model, classifier, data_loader, tokenizer, device):
+    model.eval()
     classifier.eval()
     correct = 0
     total = 0
@@ -103,10 +138,22 @@ def evaluate(decoder, classifier, data_loader, device):
 
     with torch.no_grad():
         for batch in tqdm(data_loader, desc="Evaluating", leave=False):
-            images, labels = collate_fn(batch, device)
+            images, labels, input_ids, attention_mask = collate_fn(batch, tokenizer, device)
 
-            compact_tokens = decoder(pixel_values=images)  # [B, M, D]
-            feats = compact_tokens.mean(dim=1).float()  # [B, D]
+            # Use InternVL's native multimodal forward:
+            # visual tokens are attached to the text sequence inside the model.
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                pixel_values=images,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            hidden = outputs.hidden_states[-1]  # [B, L_total, D]
+
+            # Use the last token's hidden state as a pooled representation
+            # (standard for autoregressive LMs).
+            feats = hidden[:, -1, :].float()  # [B, D]
 
             logits = classifier(feats)
             preds = logits.argmax(dim=-1)
@@ -143,85 +190,74 @@ def evaluate(decoder, classifier, data_loader, device):
 
 
 def main():
-    # Load frozen InternVL backbone (1B) in float32
-    tokenizer, base_model, _ = load_model(device=DEVICE)  # tokenizer unused here
+    tokenizer, base_model, _ = load_model(device=DEVICE)
 
-    decoder = EVLTemporalDecoder(
-        base_model,
-        max_frames=WINDOW_SIZE,
-        num_queries=8,
-        num_layers=3,
-        num_heads=4,
-    ).to(DEVICE)
+    # We use InternVL's original multimodal pipeline:
+    #   - `pixel_values` -> vision backbone + pixel unshuffle / context tokens
+    #   - visual tokens attached to text sequence inside the model
+    # The InternVL backbone is kept frozen; only the classifier is trained.
+    base_model.eval()
+    base_model.requires_grad_(False)
 
-    hidden_size = decoder.hidden_size
+    # Hidden size from the underlying language model config if present
+    language_model = getattr(base_model, "language_model", None)
+    if language_model is not None:
+        hidden_size = language_model.config.hidden_size
+    else:
+        hidden_size = base_model.config.hidden_size
+
     num_classes = len(TOP7_LABELS)
-
     classifier = nn.Linear(hidden_size, num_classes, dtype=torch.float32).to(DEVICE)
 
     train_loader, test_loader, train_samples = build_dataloaders()
     class_weights = compute_class_weights(train_samples).to(DEVICE)
 
     optimizer = torch.optim.AdamW(
-        list(decoder.parameters()) + list(classifier.parameters()),
+        classifier.parameters(),
         lr=LR,
         weight_decay=1e-4,
     )
-
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
-    best_macro_f1 = -1.0
     start_epoch = 1
-    resumed_from_state = False
+    best_macro_f1 = -1.0
 
+    # Simple resume logic from the last-epoch state if available
     if os.path.exists(STATE_PATH):
         try:
             state = torch.load(STATE_PATH, map_location=DEVICE)
-            decoder.load_state_dict(state["decoder"])
             classifier.load_state_dict(state["classifier"])
-            optimizer.load_state_dict(state["optimizer"])
-            best_macro_f1 = state.get("best_macro_f1", -1.0)
-            start_epoch = state.get("epoch", 0) + 1
-            resumed_from_state = True
+            best_macro_f1 = state.get("best_macro_f1", state.get("macro_f1", -1.0))
+            start_epoch = state["epoch"] + 1
             print(
-                f"Resuming from {STATE_PATH}: "
-                f"epoch={state.get('epoch')}, best_macro_f1={best_macro_f1*100:.2f}%"
+                f"Resuming from {STATE_PATH}: epoch={state['epoch']}, "
+                f"best_macro_f1={best_macro_f1*100:.2f}%"
             )
         except Exception as e:
-            print(f"Warning: failed to load {STATE_PATH} ({e}); deleting and falling back.")
-            try:
-                os.remove(STATE_PATH)
-            except OSError:
-                pass
-
-    if (not resumed_from_state) and os.path.exists(CKPT_PATH):
-        try:
-            ckpt = torch.load(CKPT_PATH, map_location=DEVICE)
-            decoder.load_state_dict(ckpt["decoder"])
-            classifier.load_state_dict(ckpt["classifier"])
-            best_macro_f1 = ckpt.get("macro_f1", -1.0)
-            start_epoch = ckpt.get("epoch", 0) + 1
-            print(
-                f"Warm-starting from best checkpoint {CKPT_PATH}: "
-                f"epoch={ckpt.get('epoch')}, best_macro_f1={best_macro_f1*100:.2f}%"
-            )
-        except Exception as e:
-            print(f"Warning: failed to load best checkpoint {CKPT_PATH} ({e}); starting from scratch.")
+            print(f"Warning: could not load {STATE_PATH}: {e}. Starting from scratch.")
 
     for epoch in range(start_epoch, EPOCHS + 1):
-        decoder.train()
+        base_model.eval()  # frozen feature extractor
         classifier.train()
         running_loss = 0.0
         total = 0
         correct = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch}/{EPOCHS} - train", leave=False):
-            images, labels = collate_fn(batch, DEVICE)
+            images, labels, input_ids, attention_mask = collate_fn(batch, tokenizer, DEVICE)
 
             optimizer.zero_grad()
 
-            compact_tokens = decoder(pixel_values=images)  # [B, M, D]
-            feats = compact_tokens.mean(dim=1).float()  # [B, D]
+            with torch.no_grad():
+                outputs = base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    pixel_values=images,
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+                hidden = outputs.hidden_states[-1]  # [B, L_total, D]
+                feats = hidden[:, -1, :].float()
 
             logits = classifier(feats)
             loss = criterion(logits, labels)
@@ -237,42 +273,33 @@ def main():
         train_acc = correct / max(1, total)
         print(f"\nEpoch {epoch}/{EPOCHS} - train loss: {train_loss:.4f}, acc: {train_acc*100:.2f}%")
 
-        _, macro_f1 = evaluate(decoder, classifier, test_loader, DEVICE)
+        _, macro_f1 = evaluate(base_model, classifier, test_loader, tokenizer, DEVICE)
         if macro_f1 > best_macro_f1:
             best_macro_f1 = macro_f1
             torch.save(
                 {
-                    "decoder": decoder.state_dict(),
                     "classifier": classifier.state_dict(),
                     "macro_f1": best_macro_f1,
                     "epoch": epoch,
                 },
-                CKPT_PATH,
+                BEST_PATH,
             )
-            print(f"Saved new best EVL-compact model (macro-F1={macro_f1*100:.2f}%)")
+            print(f"Saved new best InternVL-original image+text model (macro-F1={macro_f1*100:.2f}%)")
 
+        # Always save latest epoch state for resuming
         torch.save(
             {
-                "decoder": decoder.state_dict(),
                 "classifier": classifier.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "epoch": epoch,
+                "macro_f1": macro_f1,
                 "best_macro_f1": best_macro_f1,
+                "epoch": epoch,
             },
             STATE_PATH,
         )
+        print(f"Saved last-epoch InternVL-original image+text model to {STATE_PATH}")
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
 
 
