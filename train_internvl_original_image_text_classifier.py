@@ -147,11 +147,17 @@ def evaluate(model, classifier, data_loader, tokenizer, device):
             images, labels, input_ids, attention_mask = collate_fn(batch, tokenizer, device)
 
             # Use InternVL's native multimodal forward with a single image per sample.
-            # For 4D pixel_values [B, 3, H, W], image_flags is handled internally.
+            # For 4D pixel_values [B, 3, H, W], we must still provide `image_flags`.
+            # The InternVL chat model expects a 1D or 2D flag per image; for a single
+            # image per sample, a 1D tensor [B] of ones is sufficient.
+            B = images.shape[0]
+            image_flags = torch.ones(B, dtype=torch.long, device=images.device)
+
             outputs = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 pixel_values=images,
+                image_flags=image_flags,
                 output_hidden_states=True,
                 return_dict=True,
             )
@@ -254,12 +260,16 @@ def main():
 
             optimizer.zero_grad()
 
-            # Single image per sample; InternVL handles image_flags internally for 4D inputs.
+            # Single image per sample; we provide a simple per-sample flag vector [B].
+            B = images.shape[0]
+            image_flags = torch.ones(B, dtype=torch.long, device=images.device)
+
             with torch.no_grad():
                 outputs = base_model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
                     pixel_values=images,
+                    image_flags=image_flags,
                     output_hidden_states=True,
                     return_dict=True,
                 )
