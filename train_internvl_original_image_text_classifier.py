@@ -106,7 +106,13 @@ def collate_fn(batch, tokenizer, device):
         'label':    LongTensor [B]
       }
     """
-    images = batch["images"].to(device)  # [B, T, 3, H, W]
+    # For this "original InternVL" baseline, we use a single representative frame
+    # (the center frame) per sequence, so that `pixel_values` has the 4D shape
+    # expected by InternVL's vision backbone: [B, 3, H, W].
+    all_images = batch["images"].to(device)  # [B, T, 3, H, W]
+    B, T, C, H, W = all_images.shape
+    center_idx = T // 2
+    images = all_images[:, center_idx]  # [B, 3, H, W]
     labels = batch["label"].to(device)
 
     prompt = build_prompt()
@@ -140,10 +146,9 @@ def evaluate(model, classifier, data_loader, tokenizer, device):
         for batch in tqdm(data_loader, desc="Evaluating", leave=False):
             images, labels, input_ids, attention_mask = collate_fn(batch, tokenizer, device)
 
-            # Build image_flags to tell InternVL how many images per sample we have.
-            # images: [B, T, 3, H, W] -> image_flags: [B, T, 1] of ones
-            B, T = images.shape[:2]
-            image_flags = torch.ones(B, T, 1, dtype=torch.bool, device=images.device)
+            # Single image per sample: image_flags: [B, 1, 1] of ones
+            B = images.shape[0]
+            image_flags = torch.ones(B, 1, 1, dtype=torch.bool, device=images.device)
 
             # Use InternVL's native multimodal forward:
             # visual tokens are attached to the text sequence inside the model.
@@ -254,9 +259,9 @@ def main():
 
             optimizer.zero_grad()
 
-            # images: [B, T, 3, H, W] -> image_flags: [B, T, 1]
-            B, T = images.shape[:2]
-            image_flags = torch.ones(B, T, 1, dtype=torch.bool, device=images.device)
+            # Single image per sample: image_flags: [B, 1, 1]
+            B = images.shape[0]
+            image_flags = torch.ones(B, 1, 1, dtype=torch.bool, device=images.device)
 
             with torch.no_grad():
                 outputs = base_model(
