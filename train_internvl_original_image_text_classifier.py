@@ -140,12 +140,18 @@ def evaluate(model, classifier, data_loader, tokenizer, device):
         for batch in tqdm(data_loader, desc="Evaluating", leave=False):
             images, labels, input_ids, attention_mask = collate_fn(batch, tokenizer, device)
 
+            # Build image_flags to tell InternVL how many images per sample we have.
+            # images: [B, T, 3, H, W] -> image_flags: [B, T, 1] of ones
+            B, T = images.shape[:2]
+            image_flags = torch.ones(B, T, 1, dtype=torch.bool, device=images.device)
+
             # Use InternVL's native multimodal forward:
             # visual tokens are attached to the text sequence inside the model.
             outputs = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 pixel_values=images,
+                image_flags=image_flags,
                 output_hidden_states=True,
                 return_dict=True,
             )
@@ -248,11 +254,16 @@ def main():
 
             optimizer.zero_grad()
 
+            # images: [B, T, 3, H, W] -> image_flags: [B, T, 1]
+            B, T = images.shape[:2]
+            image_flags = torch.ones(B, T, 1, dtype=torch.bool, device=images.device)
+
             with torch.no_grad():
                 outputs = base_model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
                     pixel_values=images,
+                    image_flags=image_flags,
                     output_hidden_states=True,
                     return_dict=True,
                 )
