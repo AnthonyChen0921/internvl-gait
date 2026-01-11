@@ -146,17 +146,12 @@ def evaluate(model, classifier, data_loader, tokenizer, device):
         for batch in tqdm(data_loader, desc="Evaluating", leave=False):
             images, labels, input_ids, attention_mask = collate_fn(batch, tokenizer, device)
 
-            # Single image per sample: image_flags: [B, 1, 1] of ones
-            B = images.shape[0]
-            image_flags = torch.ones(B, 1, 1, dtype=torch.bool, device=images.device)
-
-            # Use InternVL's native multimodal forward:
-            # visual tokens are attached to the text sequence inside the model.
+            # Use InternVL's native multimodal forward with a single image per sample.
+            # For 4D pixel_values [B, 3, H, W], image_flags is handled internally.
             outputs = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 pixel_values=images,
-                image_flags=image_flags,
                 output_hidden_states=True,
                 return_dict=True,
             )
@@ -259,16 +254,12 @@ def main():
 
             optimizer.zero_grad()
 
-            # Single image per sample: image_flags: [B, 1, 1]
-            B = images.shape[0]
-            image_flags = torch.ones(B, 1, 1, dtype=torch.bool, device=images.device)
-
+            # Single image per sample; InternVL handles image_flags internally for 4D inputs.
             with torch.no_grad():
                 outputs = base_model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
                     pixel_values=images,
-                    image_flags=image_flags,
                     output_hidden_states=True,
                     return_dict=True,
                 )
