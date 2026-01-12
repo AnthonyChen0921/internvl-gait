@@ -16,13 +16,15 @@ from gavd_skeleton_dataset import (
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-# Use 32 frames per sequence for the 1B model (as before)
+
+# Match previous image-only setup
 WINDOW_SIZE = 32
-BATCH_SIZE = 1
+BATCH_SIZE = 1  # we will handle one video sequence at a time
 EPOCHS = 20
 LR = 5e-4
-STATE_PATH = "internvl_original_image_text_train_state.pt"
-BEST_PATH = "best_internvl_original_image_text_classifier.pt"
+
+CKPT_PATH = "best_image_only_original_internvl.pt"
+STATE_PATH = "image_only_original_internvl_state.pt"
 
 VIDEO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "GAVD-sequences")
 
@@ -77,12 +79,8 @@ def compute_class_weights(train_samples: List[Dict]) -> torch.Tensor:
 
 
 def build_prompt() -> str:
-    """
-    Expert gait clinician prompt, same as previous experiments,
-    but we rely on InternVL's native image-text fusion instead of manual mean pooling.
-    """
-    prompt = (
-        "You are an expert gait clinician. Based on the available gait information from this video, "
+    return (
+        "You are an expert gait clinician. Based on the available gait information, "
         "classify the patient's gait pattern.\n\n"
         "Gait pattern definitions:\n"
         "- abnormal: any gait pattern that deviates from normal but does not fit the specific patterns below.\n"
@@ -92,46 +90,124 @@ def build_prompt() -> str:
         "- style: exaggerated or stylistic walking pattern without clear neurological or orthopedic cause.\n"
         "- cerebral palsy: spastic, scissoring, toe-walking, or crouched gait typical of cerebral palsy.\n"
         "- parkinsons: shuffling, stooped posture, reduced arm swing, and festination typical of Parkinson's disease.\n\n"
-        "Internally decide which class is most likely; you do not need to output the class name."
+        "Answer by internally deciding which class is most likely; you do not need to output the class name."
     )
-    return prompt
 
 
-def collate_fn(batch, tokenizer, device):
+def prepare_batch(batch: Dict, tokenizer, device: str):
     """
-    `batch` is a dict from `GavdSkeletonDataset`:
-      {
-        'skeleton': FloatTensor [B, W, 46],  # unused here
-        'images':   FloatTensor [B, W, 3, H, W],
-        'label':    LongTensor [B]
-      }
+    Convert a batch from GavdSkeletonDataset into pixel_values + text inputs.
+
+    batch['images']: [B, W, 3, H, W]
+    batch['label']:  [B]
     """
-    # For this "original InternVL" baseline, we use a single representative frame
-    # (the center frame) per sequence, so that `pixel_values` has the 4D shape
-    # expected by InternVL's vision backbone: [B, 3, H, W].
-    all_images = batch["images"].to(device)  # [B, T, 3, H, W]
-    B, T, C, H, W = all_images.shape
-    center_idx = T // 2
-    images = all_images[:, center_idx]  # [B, 3, H, W]
+    images = batch["images"]  # [B, W, 3, H, W]
     labels = batch["label"].to(device)
 
-    prompt = build_prompt()
+    # We currently use BATCH_SIZE = 1, so treat each sequence as one multimodal sample.
+    # Collapse the batch dimension and keep all frames as a sequence of images.
+    # Result: [W, 3, H, W], as used in the zero-shot video script.
+    pixel_values = images.squeeze(0).to(device)
 
-    # For InternVL, we do NOT manually insert <image> tokens here; the model's
-    # multimodal forward (via `pixel_values`) handles attaching visual tokens
-    # to the text sequence using its internal image placeholder / IMG_CONTEXT logic.
+    prompt = build_prompt()
     enc = tokenizer(prompt, return_tensors="pt")
     input_ids = enc["input_ids"].to(device)
     attention_mask = enc["attention_mask"].to(device)
 
-    B = images.size(0)
-    input_ids = input_ids.expand(B, -1).contiguous()
-    attention_mask = attention_mask.expand(B, -1).contiguous()
-
-    return images, labels, input_ids, attention_mask
+    return pixel_values, labels, input_ids, attention_mask
 
 
-def evaluate(model, classifier, data_loader, tokenizer, device):
+@torch.no_grad()
+def extract_features(model, tokenizer, batch: Dict, device: str) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Run InternVL using (almost) its original multimodal path:
+      - Build a prompt containing a single <image> placeholder.
+      - Expand that into IMG_START / IMG_CONTEXT / IMG_END tokens, with
+        num_image_token * num_frames context tokens.
+      - Encode images via model.extract_feature and inject those visual tokens
+        at IMG_CONTEXT positions in the language model input embeddings.
+      - Run the frozen language model and take the last token as the video feature.
+    """
+    # Unpack batch
+    images = batch["images"]  # [B, W, 3, H, W]
+    labels = batch["label"].to(device)
+
+    # BATCH_SIZE = 1 → treat each sequence as one multimodal sample with W frames.
+    pixel_values = images.squeeze(0)
+
+    # Match model dtype / device
+    try:
+        model_dtype = next(model.parameters()).dtype
+    except StopIteration:
+        model_dtype = torch.float32
+    pixel_values = pixel_values.to(device=device, dtype=model_dtype)  # [W, 3, H, W]
+
+    # Build question with an explicit <image> placeholder, similar to chat()
+    prompt = build_prompt()
+    question = "<image>\n" + prompt
+
+    # InternVL special tokens and config
+    IMG_START_TOKEN = "<img>"
+    IMG_END_TOKEN = "</img>"
+    IMG_CONTEXT_TOKEN = "<IMG_CONTEXT>"
+
+    # Number of images (frames) in this sequence
+    num_patches = pixel_values.shape[0]
+
+    # num_image_token is defined on the InternVL chat model
+    num_image_token = getattr(model, "num_image_token", 1)
+
+    # Construct the expanded image token sequence that replaces <image>
+    image_tokens = IMG_START_TOKEN + IMG_CONTEXT_TOKEN * (num_image_token * num_patches) + IMG_END_TOKEN
+    query = question.replace("<image>", image_tokens, 1)
+
+    # Tokenize the final query
+    model_inputs = tokenizer(query, return_tensors="pt")
+    input_ids = model_inputs["input_ids"].to(device)
+    attention_mask = model_inputs["attention_mask"].to(device)
+
+    # Set img_context_token_id as in chat()
+    img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
+
+    # Encode images with the official vision path
+    vit_embeds = model.extract_feature(pixel_values)  # [total_imgs, T_v, D]
+
+    # Build LM input embeddings and inject visual tokens at IMG_CONTEXT positions
+    language_model = getattr(model, "language_model", model)
+    input_embeds = language_model.get_input_embeddings()(input_ids)  # [1, N, D]
+
+    B, N, C = input_embeds.shape
+    input_embeds = input_embeds.reshape(B * N, C)
+
+    flat_ids = input_ids.reshape(B * N)
+    selected = flat_ids == img_context_token_id
+
+    # Reshape visual embeddings to match the number of IMG_CONTEXT positions
+    vit_flat = vit_embeds.reshape(-1, C).to(input_embeds.device)
+    if vit_flat.size(0) >= selected.sum():
+        input_embeds[selected] = vit_flat[: selected.sum()]
+    else:
+        # If there are more IMG_CONTEXT positions than visual tokens (shouldn't
+        # normally happen), fill as many as possible.
+        input_embeds[selected.nonzero(as_tuple=True)[0][: vit_flat.size(0)]] = vit_flat
+
+    input_embeds = input_embeds.reshape(B, N, C)
+
+    # Run the frozen language model and take the last token as the pooled feature
+    outputs = language_model(
+        inputs_embeds=input_embeds,
+        attention_mask=attention_mask,
+        output_hidden_states=True,
+        return_dict=True,
+    )
+
+    hidden = outputs.hidden_states[-1]  # [1, N, D]
+    feats = hidden[:, -1, :].float()  # [1, D]
+
+    return feats, labels
+
+
+def evaluate(model, classifier, data_loader, tokenizer, device: str):
     model.eval()
     classifier.eval()
     correct = 0
@@ -144,29 +220,7 @@ def evaluate(model, classifier, data_loader, tokenizer, device):
 
     with torch.no_grad():
         for batch in tqdm(data_loader, desc="Evaluating", leave=False):
-            images, labels, input_ids, attention_mask = collate_fn(batch, tokenizer, device)
-
-            # Use InternVL's native multimodal forward with a single image per sample.
-            # For 4D pixel_values [B, 3, H, W], we must still provide `image_flags`.
-            # The InternVL chat model expects a 1D or 2D flag per image; for a single
-            # image per sample, a 1D tensor [B] of ones is sufficient.
-            B = images.shape[0]
-            image_flags = torch.ones(B, dtype=torch.long, device=images.device)
-
-            outputs = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                pixel_values=images,
-                image_flags=image_flags,
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            hidden = outputs.hidden_states[-1]  # [B, L_total, D]
-
-            # Use the last token's hidden state as a pooled representation
-            # (standard for autoregressive LMs).
-            feats = hidden[:, -1, :].float()  # [B, D]
-
+            feats, labels = extract_features(model, tokenizer, batch, device)
             logits = classifier(feats)
             preds = logits.argmax(dim=-1)
 
@@ -202,21 +256,15 @@ def evaluate(model, classifier, data_loader, tokenizer, device):
 
 
 def main():
-    tokenizer, base_model, _ = load_model(device=DEVICE)
+    tokenizer, model, _ = load_model(device=DEVICE)
+    # `load_model` already sets model.eval() and requires_grad_(False).
+    model.to(DEVICE)
 
-    # We use InternVL's original multimodal pipeline:
-    #   - `pixel_values` -> vision backbone + pixel unshuffle / context tokens
-    #   - visual tokens attached to text sequence inside the model
-    # The InternVL backbone is kept frozen; only the classifier is trained.
-    base_model.eval()
-    base_model.requires_grad_(False)
-
-    # Hidden size from the underlying language model config if present
-    language_model = getattr(base_model, "language_model", None)
-    if language_model is not None:
-        hidden_size = language_model.config.hidden_size
-    else:
-        hidden_size = base_model.config.hidden_size
+    hidden_size = getattr(model, "hidden_size", None)
+    if hidden_size is None:
+        # Fall back to underlying language model config
+        lm = getattr(model, "language_model", model)
+        hidden_size = lm.config.hidden_size
 
     num_classes = len(TOP7_LABELS)
     classifier = nn.Linear(hidden_size, num_classes, dtype=torch.float32).to(DEVICE)
@@ -231,50 +279,20 @@ def main():
     )
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
-    start_epoch = 1
     best_macro_f1 = -1.0
 
-    # Simple resume logic from the last-epoch state if available
-    if os.path.exists(STATE_PATH):
-        try:
-            state = torch.load(STATE_PATH, map_location=DEVICE)
-            classifier.load_state_dict(state["classifier"])
-            best_macro_f1 = state.get("best_macro_f1", state.get("macro_f1", -1.0))
-            start_epoch = state["epoch"] + 1
-            print(
-                f"Resuming from {STATE_PATH}: epoch={state['epoch']}, "
-                f"best_macro_f1={best_macro_f1*100:.2f}%"
-            )
-        except Exception as e:
-            print(f"Warning: could not load {STATE_PATH}: {e}. Starting from scratch.")
-
-    for epoch in range(start_epoch, EPOCHS + 1):
-        base_model.eval()  # frozen feature extractor
+    for epoch in range(1, EPOCHS + 1):
+        model.eval()  # frozen feature extractor
         classifier.train()
         running_loss = 0.0
         total = 0
         correct = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch}/{EPOCHS} - train", leave=False):
-            images, labels, input_ids, attention_mask = collate_fn(batch, tokenizer, DEVICE)
-
             optimizer.zero_grad()
 
-            # Single image per sample; we provide a simple per-sample flag vector [B].
-            B = images.shape[0]
-            image_flags = torch.ones(B, dtype=torch.long, device=images.device)
-
             with torch.no_grad():
-                outputs = base_model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    pixel_values=images,
-                    image_flags=image_flags,
-                    output_hidden_states=True,
-                    return_dict=True,
-                )
-                hidden = outputs.hidden_states[-1]  # [B, L_total, D]
-                feats = hidden[:, -1, :].float()
+                feats, labels = extract_features(model, tokenizer, batch, DEVICE)
 
             logits = classifier(feats)
             loss = criterion(logits, labels)
@@ -290,30 +308,31 @@ def main():
         train_acc = correct / max(1, total)
         print(f"\nEpoch {epoch}/{EPOCHS} - train loss: {train_loss:.4f}, acc: {train_acc*100:.2f}%")
 
-        _, macro_f1 = evaluate(base_model, classifier, test_loader, tokenizer, DEVICE)
+        _, macro_f1 = evaluate(model, classifier, test_loader, tokenizer, DEVICE)
         if macro_f1 > best_macro_f1:
             best_macro_f1 = macro_f1
             torch.save(
                 {
+                    "model": model.state_dict(),
                     "classifier": classifier.state_dict(),
                     "macro_f1": best_macro_f1,
                     "epoch": epoch,
                 },
-                BEST_PATH,
+                CKPT_PATH,
             )
-            print(f"Saved new best InternVL-original image+text model (macro-F1={macro_f1*100:.2f}%)")
+            print(f"Saved new best original-InternVL image-only model (macro-F1={macro_f1*100:.2f}%)")
 
-        # Always save latest epoch state for resuming
+        # Always save the latest epoch checkpoint so we can evaluate the final model.
         torch.save(
             {
+                "model": model.state_dict(),
                 "classifier": classifier.state_dict(),
                 "macro_f1": macro_f1,
-                "best_macro_f1": best_macro_f1,
                 "epoch": epoch,
             },
             STATE_PATH,
         )
-        print(f"Saved last-epoch InternVL-original image+text model to {STATE_PATH}")
+        print(f"Saved last-epoch original-InternVL image-only model to {STATE_PATH}")
 
 
 if __name__ == "__main__":
