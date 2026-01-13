@@ -23,6 +23,12 @@ BATCH_SIZE = 1
 EPOCHS = 20
 LR = 5e-4
 
+# To control memory usage inside the language model, we (1) limit how many
+# frames of skeleton text we include, and (2) cap the total number of text
+# tokens passed to the tokenizer.
+MAX_SKELETON_TEXT_FRAMES = 16
+MAX_TEXT_TOKENS = 1024
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_DIR = os.path.join(BASE_DIR, "GAVD-sequences")
 HSMR_TEXT_DIR = os.path.join(BASE_DIR, "GAVD-HSMR-text")
@@ -107,15 +113,32 @@ def _load_skeleton_text(seq_id: str, start: int, window_size: int) -> str:
         return ""
 
     max_idx = len(records) - 1
-    lines = []
-    for k in range(window_size):
-        frame_idx = start + k
-        frame_idx = min(frame_idx, max_idx)
-        rec = records[frame_idx]
+
+    # We only keep at most MAX_SKELETON_TEXT_FRAMES descriptions to avoid
+    # blowing up the LLM sequence length. If there are more frames in the
+    # window, we subsample them roughly uniformly.
+    num_available = min(window_size, len(records) - start if start <= max_idx else 0)
+    if num_available <= 0:
+        num_available = min(len(records), window_size)
+
+    num_lines = min(num_available, MAX_SKELETON_TEXT_FRAMES)
+    if num_lines <= 0:
+        return ""
+
+    step = max(1, window_size // num_lines)
+
+    lines: List[str] = []
+    used = 0
+    frame_idx = start
+    while used < num_lines and frame_idx <= start + window_size - 1:
+        idx = min(frame_idx, max_idx)
+        rec = records[idx]
         skel_str = rec.get("skel", "")
-        frame_no = rec.get("frame", frame_idx)
+        frame_no = rec.get("frame", idx)
         if skel_str:
             lines.append(f"Frame {frame_no}: {skel_str}")
+            used += 1
+        frame_idx += step
 
     return "\n".join(lines)
 
@@ -171,7 +194,13 @@ def collate_fn(batch, tokenizer, device):
 
         prompts.append(full_prompt)
 
-    enc = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True)
+    enc = tokenizer(
+        prompts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=MAX_TEXT_TOKENS,
+    )
     input_ids = enc["input_ids"].to(device)
     attention_mask = enc["attention_mask"].to(device)
 
@@ -390,6 +419,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
