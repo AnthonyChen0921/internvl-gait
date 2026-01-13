@@ -229,9 +229,10 @@ class GavdSkeletonDataset(Dataset):
 
         skeleton = torch.from_numpy(window)  # [W, 46]
         label = int(meta["label_idx"])
+        seq_id = meta["seq_id"]
 
         if not self.with_images:
-            return {"skeleton": skeleton, "label": label}
+            return {"skeleton": skeleton, "label": label, "seq_id": seq_id, "start": start}
 
         # When with_images=True, also load aligned frames from the corresponding video.
         import cv2
@@ -241,13 +242,18 @@ class GavdSkeletonDataset(Dataset):
         if self.video_dir is None:
             raise ValueError("video_dir must be provided when with_images=True")
 
-        seq_id = meta["seq_id"]
         video_path = os.path.join(self.video_dir, f"{seq_id}.mp4")
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             # Fall back: return zeros for images
             images = torch.zeros(self.window_size, 3, 448, 448, dtype=torch.float32)
-            return {"skeleton": skeleton, "label": label, "images": images}
+            return {
+                "skeleton": skeleton,
+                "label": label,
+                "images": images,
+                "seq_id": seq_id,
+                "start": start,
+            }
 
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         W = self.window_size
@@ -285,7 +291,13 @@ class GavdSkeletonDataset(Dataset):
         cap.release()
 
         images = torch.stack(frames, dim=0)  # [W, 3, 448, 448]
-        return {"skeleton": skeleton, "label": label, "images": images}
+        return {
+            "skeleton": skeleton,
+            "label": label,
+            "images": images,
+            "seq_id": seq_id,
+            "start": start,
+        }
 
 
 
