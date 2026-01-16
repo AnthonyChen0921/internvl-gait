@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Dict, List, Tuple
 
 import torch
@@ -29,8 +30,8 @@ LR = 5e-4
 MAX_SKELETON_TEXT_FRAMES = 16
 MAX_TEXT_TOKENS = 1024
 
-CKPT_PATH = "best_image_only_original_internvl.pt"
-STATE_PATH = "image_only_original_internvl_state.pt"
+CKPT_PATH = "best_image_only_original_internvl_skeltext.pt"
+STATE_PATH = "image_only_original_internvl_skeltext_state.pt"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_DIR = os.path.join(BASE_DIR, "GAVD-sequences")
@@ -148,6 +149,14 @@ def build_prompt(skeleton_text: str) -> str:
     base_prompt = (
         "You are an expert gait clinician. Based on the available gait information, "
         "classify the patient's gait pattern.\n\n"
+        "Gait pattern definitions:\n"
+        "- abnormal: any gait pattern that deviates from normal but does not fit the specific patterns below.\n"
+        "- myopathic: waddling or Trendelenburg-type gait due to proximal muscle weakness.\n"
+        "- exercise: exaggerated, energetic, or performance-like gait related to sport or exercise.\n"
+        "- normal: typical, symmetric gait without obvious abnormalities.\n"
+        "- style: exaggerated or stylistic walking pattern without clear neurological or orthopedic cause.\n"
+        "- cerebral palsy: spastic, scissoring, toe-walking, or crouched gait typical of cerebral palsy.\n"
+        "- parkinsons: shuffling, stooped posture, reduced arm swing, and festination typical of Parkinson's disease.\n\n"
         "Below are per-frame skeleton parameters extracted from the same gait sequence.\n"
         "Use both the visual gait information and these skeleton parameters to internally decide which class is most likely. "
         "You do not need to output the class name."
@@ -178,7 +187,12 @@ def prepare_batch(batch: Dict, tokenizer, device: str):
 
     skel_text = _load_skeleton_text(seq_id, start, WINDOW_SIZE)
     prompt = build_prompt(skel_text)
-    enc = tokenizer(prompt, return_tensors="pt")
+    enc = tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=MAX_TEXT_TOKENS,
+    )
     input_ids = enc["input_ids"].to(device)
     attention_mask = enc["attention_mask"].to(device)
 
@@ -393,7 +407,7 @@ def main():
                 },
                 CKPT_PATH,
             )
-            print(f"Saved new best original-InternVL image-only model (macro-F1={macro_f1*100:.2f}%)")
+            print(f"Saved new best original-InternVL (skeltext) model (macro-F1={macro_f1*100:.2f}%)")
 
         # Always save the latest epoch checkpoint so we can evaluate the final model.
         torch.save(
@@ -405,10 +419,9 @@ def main():
             },
             STATE_PATH,
         )
-        print(f"Saved last-epoch original-InternVL image-only model to {STATE_PATH}")
+        print(f"Saved last-epoch original-InternVL (skeltext) model to {STATE_PATH}")
 
 
 if __name__ == "__main__":
     main()
-
 
