@@ -213,6 +213,8 @@ def extract_features(model, tokenizer, batch: Dict, device: str) -> Tuple[torch.
     # Unpack batch
     images = batch["images"]  # [B, W, 3, H, W]
     labels = batch["label"].to(device)
+    seq_id = batch["seq_id"][0]
+    start = int(batch["start"][0].item())
 
     # BATCH_SIZE = 1 → treat each sequence as one multimodal sample with W frames.
     pixel_values = images.squeeze(0)
@@ -225,7 +227,8 @@ def extract_features(model, tokenizer, batch: Dict, device: str) -> Tuple[torch.
     pixel_values = pixel_values.to(device=device, dtype=model_dtype)  # [W, 3, H, W]
 
     # Build question with an explicit <image> placeholder, similar to chat()
-    prompt = build_prompt()
+    skel_text = _load_skeleton_text(seq_id, start, WINDOW_SIZE)
+    prompt = build_prompt(skel_text)
     question = "<image>\n" + prompt
 
     # InternVL special tokens and config
