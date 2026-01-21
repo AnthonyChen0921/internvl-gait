@@ -23,18 +23,10 @@ BATCH_SIZE = 1  # we will handle one video sequence at a time
 EPOCHS = 20
 LR = 5e-4
 
-# To control memory usage inside the language model, we (1) limit how many
-# frames of skeleton text we include, and (2) cap the total number of text
-# tokens passed to the tokenizer.
-MAX_SKELETON_TEXT_FRAMES = 16
-MAX_TEXT_TOKENS = 1024
-
 CKPT_PATH = "best_image_only_original_internvl.pt"
 STATE_PATH = "image_only_original_internvl_state.pt"
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VIDEO_DIR = os.path.join(BASE_DIR, "GAVD-sequences")
-HSMR_TEXT_DIR = os.path.join(BASE_DIR, "GAVD-HSMR-text")
+VIDEO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "GAVD-sequences")
 
 
 def build_dataloaders() -> Tuple[DataLoader, DataLoader, List[Dict]]:
@@ -86,77 +78,20 @@ def compute_class_weights(train_samples: List[Dict]) -> torch.Tensor:
     return weights
 
 
-def _load_skeleton_text(seq_id: str, start: int, window_size: int) -> str:
-    """
-    Load per-frame skeleton text from GAVD-HSMR-text/HSMR-{seq_id}.jsonl and
-    align it with the same temporal window [start, start+window_size).
-    """
-    path = os.path.join(HSMR_TEXT_DIR, f"HSMR-{seq_id}.jsonl")
-    if not os.path.exists(path):
-        return ""
-
-    records = []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                records.append(obj)
-    except OSError:
-        return ""
-
-    if not records:
-        return ""
-
-    max_idx = len(records) - 1
-
-    # We only keep at most MAX_SKELETON_TEXT_FRAMES descriptions to avoid
-    # blowing up the LLM sequence length. If there are more frames in the
-    # window, we subsample them roughly uniformly.
-    num_available = min(window_size, len(records) - start if start <= max_idx else 0)
-    if num_available <= 0:
-        num_available = min(len(records), window_size)
-
-    num_lines = min(num_available, MAX_SKELETON_TEXT_FRAMES)
-    if num_lines <= 0:
-        return ""
-
-    step = max(1, window_size // num_lines)
-
-    lines: List[str] = []
-    used = 0
-    frame_idx = start
-    while used < num_lines and frame_idx <= start + window_size - 1:
-        idx = min(frame_idx, max_idx)
-        rec = records[idx]
-        skel_str = rec.get("skel", "")
-        frame_no = rec.get("frame", idx)
-        if skel_str:
-            lines.append(f"Frame {frame_no}: {skel_str}")
-            used += 1
-        frame_idx += step
-
-    return "\n".join(lines)
-
-
-def build_prompt(skeleton_text: str) -> str:
-    base_prompt = (
+def build_prompt() -> str:
+    return (
         "You are an expert gait clinician. Based on the available gait information, "
         "classify the patient's gait pattern.\n\n"
-        "Below are per-frame skeleton parameters extracted from the same gait sequence.\n"
-        "Use both the visual gait information and these skeleton parameters to internally decide which class is most likely. "
-        "You do not need to output the class name."
+        "Gait pattern definitions:\n"
+        "- abnormal: any gait pattern that deviates from normal but does not fit the specific patterns below.\n"
+        "- myopathic: waddling or Trendelenburg-type gait due to proximal muscle weakness.\n"
+        "- exercise: exaggerated, energetic, or performance-like gait related to sport or exercise.\n"
+        "- normal: typical, symmetric gait without obvious abnormalities.\n"
+        "- style: exaggerated or stylistic walking pattern without clear neurological or orthopedic cause.\n"
+        "- cerebral palsy: spastic, scissoring, toe-walking, or crouched gait typical of cerebral palsy.\n"
+        "- parkinsons: shuffling, stooped posture, reduced arm swing, and festination typical of Parkinson's disease.\n\n"
+        "Answer by internally deciding which class is most likely; you do not need to output the class name."
     )
-
-    if skeleton_text:
-        return base_prompt + "\n\nSkeleton parameters:\n" + skeleton_text
-
-    return base_prompt + "\n\n(No skeleton parameters available for this sequence.)"
 
 
 def prepare_batch(batch: Dict, tokenizer, device: str):
@@ -168,16 +103,13 @@ def prepare_batch(batch: Dict, tokenizer, device: str):
     """
     images = batch["images"]  # [B, W, 3, H, W]
     labels = batch["label"].to(device)
-    seq_id = batch["seq_id"][0]
-    start = int(batch["start"][0].item())
 
     # We currently use BATCH_SIZE = 1, so treat each sequence as one multimodal sample.
     # Collapse the batch dimension and keep all frames as a sequence of images.
     # Result: [W, 3, H, W], as used in the zero-shot video script.
     pixel_values = images.squeeze(0).to(device)
 
-    skel_text = _load_skeleton_text(seq_id, start, WINDOW_SIZE)
-    prompt = build_prompt(skel_text)
+    prompt = build_prompt()
     enc = tokenizer(prompt, return_tensors="pt")
     input_ids = enc["input_ids"].to(device)
     attention_mask = enc["attention_mask"].to(device)
@@ -230,12 +162,7 @@ def extract_features(model, tokenizer, batch: Dict, device: str) -> Tuple[torch.
     query = question.replace("<image>", image_tokens, 1)
 
     # Tokenize the final query
-    model_inputs = tokenizer(
-        query,
-        return_tensors="pt",
-        truncation=True,
-        max_length=MAX_TEXT_TOKENS,
-    )
+    model_inputs = tokenizer(query, return_tensors="pt")
     input_ids = model_inputs["input_ids"].to(device)
     attention_mask = model_inputs["attention_mask"].to(device)
 
