@@ -55,7 +55,7 @@ def main():
     decoder = EVLTemporalDecoder(
         base_model,
         max_frames=WINDOW_SIZE,
-        num_queries=8,
+        num_queries=WINDOW_SIZE,  # align one query per frame
         num_layers=3,
         num_heads=4,
     ).to(DEVICE)
