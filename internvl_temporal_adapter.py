@@ -258,6 +258,101 @@ class EVLTemporalDecoder(nn.Module):
         frame_tokens = frame_tokens.view(B, T, -1)  # [B, T, D]
         return frame_tokens
 
+
+class FrameAlignedEVLDecoder(nn.Module):
+    """
+    EVL-style decoder that preserves frame alignment.
+
+    - Uses per-frame tokens as BOTH query (tgt) and memory.
+    - Applies a TransformerDecoder over time, then adds a residual to keep
+      frame alignment.
+    - Output: [B, T, D] tokens, one per frame.
+    """
+
+    def __init__(
+        self,
+        base_model: nn.Module,
+        max_frames: int = 32,
+        num_layers: int = 3,
+        num_heads: int = 4,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.base_model = base_model
+        self.base_model.requires_grad_(False)
+
+        language_model = getattr(self.base_model, "language_model", None)
+        if language_model is not None:
+            hidden_size = language_model.config.hidden_size
+            try:
+                lm_dtype = next(language_model.parameters()).dtype
+            except StopIteration:
+                lm_dtype = torch.float32
+        else:
+            hidden_size = self.base_model.config.hidden_size
+            try:
+                lm_dtype = next(self.base_model.parameters()).dtype
+            except StopIteration:
+                lm_dtype = torch.float32
+
+        self.hidden_size = hidden_size
+        self.max_frames = max_frames
+
+        self.temporal_pos_emb = nn.Parameter(
+            torch.zeros(max_frames, hidden_size, dtype=lm_dtype)
+        )
+
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=hidden_size,
+            nhead=num_heads,
+            dim_feedforward=hidden_size * 4,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.temporal_decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
+
+    def encode_images(self, pixel_values: torch.Tensor) -> torch.Tensor:
+        if pixel_values.ndim != 5:
+            raise ValueError(f"pixel_values must be [B, T, 3, H, W], got {pixel_values.shape}")
+
+        device = next(self.parameters()).device
+        try:
+            dtype = next(self.base_model.parameters()).dtype
+        except StopIteration:
+            dtype = torch.float32
+
+        B, T, C, H, W = pixel_values.shape
+        if T > self.max_frames:
+            raise ValueError(f"T = {T} exceeds max_frames = {self.max_frames}")
+
+        flat = pixel_values.to(device=device, dtype=dtype).view(B * T, C, H, W)
+        with torch.no_grad():
+            vit_embeds = self.base_model.extract_feature(flat)  # [B*T, N_tokens, D]
+
+        frame_tokens = vit_embeds.mean(dim=1)  # [B*T, D]
+        frame_tokens = frame_tokens.view(B, T, -1)  # [B, T, D]
+        return frame_tokens
+
+    def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            pixel_values: [B, T, 3, H, W]
+        Returns:
+            frame_aligned_tokens: [B, T, D]
+        """
+        device = next(self.parameters()).device
+        frame_tokens = self.encode_images(pixel_values)  # [B, T, D]
+        B, T, D = frame_tokens.shape
+
+        pos = self.temporal_pos_emb[:T].unsqueeze(0).to(device)  # [1, T, D]
+        memory = frame_tokens + pos
+        tgt = frame_tokens + pos
+
+        decoded = self.temporal_decoder(tgt=tgt, memory=memory)  # [B, T, D]
+        return frame_tokens + decoded
+
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """
         Args:
