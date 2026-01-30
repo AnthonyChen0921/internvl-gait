@@ -258,6 +258,28 @@ class EVLTemporalDecoder(nn.Module):
         frame_tokens = frame_tokens.view(B, T, -1)  # [B, T, D]
         return frame_tokens
 
+    def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            pixel_values: [B, T, 3, H, W]
+
+        Returns:
+            compact_tokens: [B, num_queries, hidden_size]  (q_M in the diagram)
+        """
+        device = next(self.parameters()).device
+        memory = self.encode_images(pixel_values)  # [B, T, D]
+        B, T, _ = memory.shape
+
+        # Add temporal position encoding to memory
+        pos = self.temporal_pos_emb[:T].unsqueeze(0).to(device)  # [1, T, D]
+        memory = memory + pos
+
+        # Expand learnable queries for the batch
+        queries = self.query_tokens.unsqueeze(0).expand(B, -1, -1).to(device)  # [B, M, D]
+
+        compact_tokens = self.temporal_decoder(tgt=queries, memory=memory)  # [B, M, D]
+        return compact_tokens
+
 
 class FrameAlignedEVLDecoder(nn.Module):
     """
@@ -352,26 +374,4 @@ class FrameAlignedEVLDecoder(nn.Module):
 
         decoded = self.temporal_decoder(tgt=tgt, memory=memory)  # [B, T, D]
         return frame_tokens + decoded
-
-    def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            pixel_values: [B, T, 3, H, W]
-
-        Returns:
-            compact_tokens: [B, num_queries, hidden_size]  (q_M in the diagram)
-        """
-        device = next(self.parameters()).device
-        memory = self.encode_images(pixel_values)  # [B, T, D]
-        B, T, D = memory.shape
-
-        # Add temporal position encoding to memory
-        pos = self.temporal_pos_emb[:T].unsqueeze(0).to(device)  # [1, T, D]
-        memory = memory + pos
-
-        # Expand learnable queries for the batch
-        queries = self.query_tokens.unsqueeze(0).expand(B, -1, -1).to(device)  # [B, M, D]
-
-        compact_tokens = self.temporal_decoder(tgt=queries, memory=memory)  # [B, M, D]
-        return compact_tokens
 
