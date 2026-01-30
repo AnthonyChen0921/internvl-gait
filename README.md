@@ -18,40 +18,22 @@ git clone "$REPO_URL" "$REPO_DIR"
 cd "$REPO_DIR"
 ```
 
-### Conda installation
-```bash
-command -v conda >/dev/null 2>&1 || {
-  wget -O /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-  bash /tmp/miniconda.sh -b -p "$HOME/miniconda3"
-  echo 'export PATH="$HOME/miniconda3/bin:$PATH"' >> ~/.bashrc
-  export PATH="$HOME/miniconda3/bin:$PATH"
-  conda init bash
-}
 
-exec bash -l
-```
-
-### Conda env creation and activation
+### Conda env
 ```bash
+cd ~/internvl-gait
+
 conda create -n internvl-gait python=3.10 -y
 conda activate internvl-gait
 
-python -V
-which python
+pip install -r requirements.txt
 ```
 
-### Install requirements
-```bash
-cd "$HOME/internvl-gait"
-pip install -U pip wheel setuptools
-test -f requirements.txt && pip install -r requirements.txt
-```
-
-### Update transformers to match hub 1.x
+### Update transformers to support QWEN3 & install openCV
 ```bash
 conda activate internvl-gait
-pip install -U "transformers>=4.49.0" "huggingface_hub>=0.23.2" "tokenizers>=0.19" accelerate safetensors
-python -c "import transformers, huggingface_hub; print('transformers', transformers.__version__); print('huggingface_hub', huggingface_hub.__version__)"
+pip install "transformers>=4.40.0" accelerate safetensors einops
+pip install opencv-python-headless==4.10.0.84
 ```
 
 ### Download GAVD-sequences and put it under internvl-gait/GAVD-sequences (Google instance)
@@ -125,37 +107,11 @@ rmdir "$SRC" 2>/dev/null || true
 
 ### Download the InternVL model
 ```bash
-# hf
-python -m pip install -U pip
-python -m pip install -U huggingface_hub hf_transfer
-
-# fast downloads (optional)
-export HF_HUB_ENABLE_HF_TRANSFER=1
-
-# internvl
 mkdir -p ~/Models
-
-export MODEL_ID="OpenGVLab/InternVL3_5-1B"   # <-- 8B as well
-export LOCAL_DIR="$HOME/Models/$(basename "$MODEL_ID")"
-
-python - << 'PY'
-import os
-from huggingface_hub import snapshot_download
-
-model_id = os.environ["MODEL_ID"]
-local_dir = os.environ["LOCAL_DIR"]
-
-print("Downloading:", model_id)
-print("To:", local_dir)
-
-snapshot_download(
-    repo_id=model_id,
-    local_dir=local_dir,
-    local_dir_use_symlinks=False,
-    token=os.environ.get("HF_TOKEN", None),
-)
-print("Done.")
-PY
+cd ~/Models
+git lfs install
+git clone https://huggingface.co/OpenGVLab/InternVL3_5-1B
+git clone https://huggingface.co/OpenGVLab/InternVL3_5-8B
 ```
 
 ### Running the experiment
