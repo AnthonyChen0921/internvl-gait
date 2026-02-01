@@ -19,7 +19,7 @@ from gavd_skeleton_dataset import (
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 WINDOW_SIZE = 32
 BATCH_SIZE = 1
-EPOCHS = 20
+EPOCHS = 40
 LR = 5e-4
 
 VIDEO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "GAVD-sequences")
