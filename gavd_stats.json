@@ -1,0 +1,106 @@
+{
+  "paths": {
+    "annotations_glob": "C:\\Users\\1nkas-Strix-4090-ll\\Desktop\\InternVL\\GAVD\\data\\GAVD_Clinical_Annotations_*.csv",
+    "hsmr_dir": "C:\\Users\\1nkas-Strix-4090-ll\\Desktop\\InternVL\\GAVD-HSMR",
+    "hsmr_single_dir": "C:\\Users\\1nkas-Strix-4090-ll\\Desktop\\InternVL\\GAVD-HSMR-single",
+    "hsmr_text_dir": "C:\\Users\\1nkas-Strix-4090-ll\\Desktop\\InternVL\\GAVD-HSMR-text",
+    "video_dir": "C:\\Users\\1nkas-Strix-4090-ll\\Desktop\\InternVL\\GAVD-sequences"
+  },
+  "annotations": {
+    "annotation_rows": 458116,
+    "unique_sequences": 1874,
+    "unique_videos": 348,
+    "gait_pat_counts_seq_level": {
+      "parkinsons": 47,
+      "abnormal": 767,
+      "style": 104,
+      "cerebral palsy": 64,
+      "myopathic": 188,
+      "antalgic": 35,
+      "exercise": 234,
+      "inebriated": 23,
+      "normal": 291,
+      "stroke": 76,
+      "prosthetic": 39,
+      "pregnant": 6
+    },
+    "gait_pat_top7_counts_seq_level": {
+      "abnormal": 767,
+      "myopathic": 188,
+      "exercise": 234,
+      "normal": 291,
+      "style": 104,
+      "cerebral palsy": 64,
+      "parkinsons": 47
+    },
+    "cam_view_counts_seq_level": {
+      "right side": 496,
+      "left side": 534,
+      "front": 520,
+      "back": 316,
+      "nan": 5,
+      "other": 3
+    }
+  },
+  "local_assets": {
+    "raw_hsmr_sequences": 1745,
+    "single_person_sequences": 1019,
+    "text_sequences": 1745,
+    "video_sequences_mp4": 1801,
+    "annotation\u2229raw_hsmr": 1745,
+    "annotation\u2229single_person": 1019,
+    "annotation\u2229video_mp4": 1801
+  },
+  "experiment_dataset": {
+    "definition": {
+      "source": "Mirrored from gavd_skeleton_dataset.collect_labeled_sequences() (implemented here without torch)",
+      "filters": [
+        "sequence has preprocessed single-person skeleton file in GAVD-HSMR-single (expected shape [T,46])",
+        "annotation provides non-empty video id (`id` column)",
+        "`gait_pat` is one of TOP7_LABELS = ['abnormal', 'myopathic', 'exercise', 'normal', 'style', 'cerebral palsy', 'parkinsons']",
+        "train/test split is performed at the video_id level (no video overlaps)",
+        "video mp4 is not required by the loader (missing mp4 falls back to zero images in GavdSkeletonDataset)",
+        "skeleton-text jsonl is optional (missing text yields empty prompt augmentation)"
+      ]
+    },
+    "sequences": 942,
+    "unique_videos": 198,
+    "label_counts": {
+      "parkinsons": 29,
+      "abnormal": 401,
+      "cerebral palsy": 40,
+      "myopathic": 163,
+      "exercise": 155,
+      "normal": 90,
+      "style": 64
+    },
+    "total_frames_by_label": {
+      "abnormal": 104740,
+      "myopathic": 27541,
+      "exercise": 34472,
+      "normal": 12984,
+      "style": 6274,
+      "cerebral palsy": 13071,
+      "parkinsons": 6255
+    },
+    "frame_len_stats": {
+      "min": 21,
+      "p25": 95.0,
+      "median": 154.0,
+      "p75": 244.0,
+      "p95": 653.8499999999998,
+      "max": 1782,
+      "mean": 217.97983014861995
+    },
+    "train_sequences": 649,
+    "test_sequences": 293,
+    "train_unique_videos": 158,
+    "test_unique_videos": 40,
+    "missing_mp4_count": 0,
+    "missing_text_count": 0,
+    "excluded": {
+      "single_person_missing_annotations": 0,
+      "single_person_malformed_skeleton": 1
+    }
+  }
+}

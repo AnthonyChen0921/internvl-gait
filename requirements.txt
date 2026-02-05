@@ -15,3 +15,10 @@ requests==2.32.3
 timm==1.0.9
 pandas==2.2.3
 
+# Utilities used by preprocessing / analysis scripts
+matplotlib>=3.9.2
+# NOTE: use opencv-python (not headless) if you want interactive video marking windows.
+opencv-python>=4.10.0.84
+# Optional: provides a packaged ffmpeg binary if you don't have ffmpeg on PATH.
+imageio-ffmpeg>=0.5.1
+

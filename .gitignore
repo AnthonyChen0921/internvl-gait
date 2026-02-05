@@ -25,4 +25,11 @@ GAVD-sequences/
 logs/
 *.log
 
-
+# Gait-videos
+Gait-videos
+Gait-videos-clipped
+clipped_video_frame_lengths.csv
+gait_video_clips.csv
+gait_videos_name_parsed.csv
+gait_videos_name_stats.json
+Gait-videos-clipped.zip
