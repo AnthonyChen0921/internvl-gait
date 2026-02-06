@@ -1,0 +1,40 @@
+{
+  "source_audit_csv": "dcm_track_audit.csv",
+  "rule": "remove sequences where max_people==2 and total_detections==2*frames_with_people (always 2 people when detected)",
+  "counts": {
+    "total": 258,
+    "removed_ambiguous": 19,
+    "kept": 239,
+    "missing_skeleton_files": 0
+  },
+  "removed_examples": [
+    "DCM_21_FastWalkData_1_clip.mp4",
+    "DCM_21_FastWalkData_4_clip.mp4",
+    "DCM_25_WalkData_1_clip.mp4",
+    "DCM_30_FastWalkData_3_clip.mp4",
+    "DCM_33_WalkData_3_clip.mp4",
+    "DCM_36_FastWalkData_1_clip.mp4",
+    "DCM_36_FastWalkData_2_clip.mp4",
+    "DCM_36_FastWalkData_5_clip.mp4",
+    "DCM_38_WalkData_4_clip.mp4",
+    "DCM_44_WalkData_2_clip.mp4",
+    "DCM_44_WalkData_5_clip.mp4",
+    "DCM_67_FastWalkData_3_clip.mp4",
+    "DCM_67_FastWalkData_5_clip.mp4",
+    "DCM_82_FastWalkData_1_clip.mp4",
+    "DCM_82_FastWalkData_2_clip.mp4",
+    "DCM_82_FastWalkData_3_clip.mp4",
+    "DCM_86_FastWalkData_1_clip.mp4",
+    "DCM_86_FastWalkData_3_clip.mp4",
+    "DCM_89_WalkData_4_clip.mp4"
+  ],
+  "kept_len_stats_T_out": {
+    "min": 38,
+    "p25": 95.0,
+    "median": 119.0,
+    "p75": 151.0,
+    "p95": 260.6999999999998,
+    "max": 840,
+    "mean": 146.9581589958159
+  }
+}

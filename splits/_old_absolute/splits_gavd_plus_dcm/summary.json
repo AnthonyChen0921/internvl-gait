@@ -1,0 +1,91 @@
+{
+  "params": {
+    "train_ratio": 0.8,
+    "seed": 42,
+    "dcm_label_mode": "type"
+  },
+  "gavd": {
+    "train": {
+      "rows": 728,
+      "groups": 158,
+      "labels": {
+        "abnormal": 277,
+        "myopathic": 141,
+        "exercise": 128,
+        "normal": 80,
+        "style": 46,
+        "cerebral palsy": 32,
+        "parkinsons": 24
+      }
+    },
+    "test": {
+      "rows": 214,
+      "groups": 40,
+      "labels": {
+        "abnormal": 124,
+        "exercise": 27,
+        "myopathic": 22,
+        "style": 18,
+        "normal": 10,
+        "cerebral palsy": 8,
+        "parkinsons": 5
+      }
+    }
+  },
+  "dcm": {
+    "train": {
+      "rows": 187,
+      "groups": 23,
+      "labels": {
+        "dcm:WalkData": 97,
+        "dcm:FastWalkData": 85,
+        "dcm:FwdWalkData": 5
+      }
+    },
+    "test": {
+      "rows": 52,
+      "groups": 6,
+      "labels": {
+        "dcm:WalkData": 32,
+        "dcm:FastWalkData": 20
+      }
+    }
+  },
+  "combined": {
+    "train": {
+      "rows": 915,
+      "groups": 181,
+      "labels": {
+        "abnormal": 277,
+        "myopathic": 141,
+        "exercise": 128,
+        "dcm:WalkData": 97,
+        "dcm:FastWalkData": 85,
+        "normal": 80,
+        "style": 46,
+        "cerebral palsy": 32,
+        "parkinsons": 24,
+        "dcm:FwdWalkData": 5
+      }
+    },
+    "test": {
+      "rows": 266,
+      "groups": 46,
+      "labels": {
+        "abnormal": 124,
+        "dcm:WalkData": 32,
+        "exercise": 27,
+        "myopathic": 22,
+        "dcm:FastWalkData": 20,
+        "style": 18,
+        "normal": 10,
+        "cerebral palsy": 8,
+        "parkinsons": 5
+      }
+    }
+  },
+  "leak_checks": {
+    "gavd_video_overlap_train_test": 0,
+    "dcm_subject_overlap_train_test": 0
+  }
+}

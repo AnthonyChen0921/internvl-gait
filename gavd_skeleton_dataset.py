@@ -239,10 +239,13 @@ class GavdSkeletonDataset(Dataset):
         from PIL import Image as PILImage
         import torchvision.transforms as T
 
-        if self.video_dir is None:
-            raise ValueError("video_dir must be provided when with_images=True")
+        # Allow per-sample override (useful when mixing datasets with different video roots)
+        video_path = meta.get("video_path")
+        if not isinstance(video_path, str) or video_path.strip() == "":
+            if self.video_dir is None:
+                raise ValueError("video_dir must be provided when with_images=True (or set meta['video_path'])")
+            video_path = os.path.join(self.video_dir, f"{seq_id}.mp4")
 
-        video_path = os.path.join(self.video_dir, f"{seq_id}.mp4")
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             # Fall back: return zeros for images

@@ -27,9 +27,17 @@ logs/
 
 # Gait-videos
 Gait-videos
-Gait-videos-clipped
 clipped_video_frame_lengths.csv
 gait_video_clips.csv
 gait_videos_name_parsed.csv
 gait_videos_name_stats.json
 Gait-videos-clipped.zip
+GAVD-HSMR-dcm
+
+# newly cliped dcm videos
+Gait-videos-clipped
+GAVD-videos-clipped-oneperson-filtered
+GAVD-HSMR-dcm-text
+GAVD-HSMR-dcm-text-oneperson-filtered
+GAVD-HSMR-dcm-oneperson
+GAVD-HSMR-dcm-oneperson-filtered
