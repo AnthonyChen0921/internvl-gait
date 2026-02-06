@@ -42,6 +42,16 @@ ARGS = None
 LABELS: List[str] = []
 
 
+def _print_label_distribution(samples: List[Dict], labels: List[str], title: str) -> None:
+    counts = [0] * len(labels)
+    for s in samples:
+        idx = int(s["label_idx"])
+        if 0 <= idx < len(counts):
+            counts[idx] += 1
+    parts = [f"{labels[i]}: {counts[i]}" for i in range(len(labels))]
+    print(f"\n{title}: " + " ".join(parts))
+
+
 def _load_samples_from_split_csv(csv_path: str, label_to_idx: Dict[str, int]) -> List[Dict]:
     """
     Load samples from a split CSV produced by `make_gavd_plus_dcm_splits.py`.
@@ -105,6 +115,8 @@ def build_dataloaders() -> Tuple[DataLoader, DataLoader, List[Dict], List[str]]:
     # Video-level summary
     print(f"\nTrain sequences: {len(train_samples)}")
     print(f"Test sequences: {len(test_samples)}")
+    _print_label_distribution(train_samples, labels, title="Train label distribution")
+    _print_label_distribution(test_samples, labels, title="Test label distribution")
     if not ARGS.splits_dir:
         train_videos = {s["video_id"] for s in train_samples}
         test_videos = {s["video_id"] for s in test_samples}
