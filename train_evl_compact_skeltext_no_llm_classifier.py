@@ -24,7 +24,7 @@ EPOCHS = 20
 LR = 5e-4
 
 # To control memory usage for the text input
-MAX_SKELETON_TEXT_FRAMES = 16
+MAX_SKELETON_TEXT_FRAMES = 32
 MAX_TEXT_TOKENS = 1024
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

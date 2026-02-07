@@ -1,6 +1,7 @@
 import os
 import json
-from typing import Dict, List
+import argparse
+from typing import Dict, List, Tuple
 
 import torch
 from torch import nn
@@ -19,11 +20,11 @@ from gavd_skeleton_dataset import (
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 WINDOW_SIZE = 32
-BATCH_SIZE = 1
+BATCH_SIZE = 4
 EPOCHS = 40
 LR = 5e-4
 
-MAX_SKELETON_TEXT_FRAMES = 16
+MAX_SKELETON_TEXT_FRAMES = 32
 MAX_TEXT_TOKENS = 1024
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,63 +34,141 @@ HSMR_TEXT_DIR = os.path.join(BASE_DIR, "GAVD-HSMR-text")
 CKPT_PATH = "best_evl_framealigned_skeltext_classifier.pt"
 STATE_PATH = "evl_framealigned_skeltext_train_state.pt"
 
+ARGS = None
+LABELS: List[str] = []
 
-def build_dataloaders():
-    samples = collect_labeled_sequences()
-    train_samples, test_samples = video_level_train_test_split(samples, train_ratio=0.8)
 
-    train_videos = {s["video_id"] for s in train_samples}
-    test_videos = {s["video_id"] for s in test_samples}
+def _resolve(p: str) -> str:
+    p = str(p)
+    if not os.path.isabs(p):
+        p = os.path.join(BASE_DIR, p)
+    return os.path.normpath(p)
+
+
+def _load_samples_from_split_csv(csv_path: str, label_to_idx: Dict[str, int]) -> List[Dict]:
+    """
+    Load samples from a split CSV produced by `make_gavd_plus_dcm_splits.py`.
+    Expected columns: seq_id,label,skeleton_path,video_path,text_path
+    """
+    import pandas as pd
+
+    df = pd.read_csv(csv_path)
+    required = {"seq_id", "label", "skeleton_path", "video_path"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Split CSV is missing columns {sorted(missing)}: {csv_path}")
+
+    has_text = "text_path" in df.columns
+    samples: List[Dict] = []
+    for _, r in df.iterrows():
+        seq_id = str(r["seq_id"])
+        label_str = str(r["label"])
+        if label_str not in label_to_idx:
+            raise ValueError(f"Unknown label {label_str!r} in {csv_path}. Known: {sorted(label_to_idx.keys())}")
+        meta = {
+            "seq_id": seq_id,
+            "path": _resolve(r["skeleton_path"]),
+            "video_path": _resolve(r["video_path"]),
+            "label_str": label_str,
+            "label_idx": int(label_to_idx[label_str]),
+        }
+        if has_text and isinstance(r["text_path"], str) and r["text_path"].strip() != "":
+            meta["text_path"] = _resolve(r["text_path"])
+        samples.append(meta)
+    return samples
+
+
+def _print_label_distribution(samples: List[Dict], labels: List[str], title: str) -> None:
+    counts = [0] * len(labels)
+    for s in samples:
+        idx = int(s["label_idx"])
+        if 0 <= idx < len(counts):
+            counts[idx] += 1
+    parts = [f"{labels[i]}: {counts[i]}" for i in range(len(labels))]
+    print(f"\n{title}: " + " ".join(parts))
+
+
+def build_dataloaders() -> Tuple[DataLoader, DataLoader, List[Dict], List[str]]:
+    """
+    Two modes:
+      - Default (GAVD-only): uses collect_labeled_sequences() + video-level split.
+      - Combined (GAVD+DCM): pass --splits-dir to load combined_train/test.csv (leak-free).
+    """
+    assert ARGS is not None
+
+    if ARGS.splits_dir:
+        splits_dir = ARGS.splits_dir
+        train_csv = os.path.join(splits_dir, "combined_train.csv")
+        test_csv = os.path.join(splits_dir, "combined_test.csv")
+
+        labels = TOP7_LABELS + ["dcm"]  # single-label DCM splits
+        label_to_idx = {lbl: i for i, lbl in enumerate(labels)}
+        train_samples = _load_samples_from_split_csv(train_csv, label_to_idx=label_to_idx)
+        test_samples = _load_samples_from_split_csv(test_csv, label_to_idx=label_to_idx)
+    else:
+        labels = TOP7_LABELS
+        samples = collect_labeled_sequences()
+        train_samples, test_samples = video_level_train_test_split(samples, train_ratio=0.8, seed=42)
+        # Default skeleton-text path for GAVD
+        for s in train_samples:
+            s["text_path"] = os.path.join(HSMR_TEXT_DIR, f"HSMR-{s['seq_id']}.jsonl")
+        for s in test_samples:
+            s["text_path"] = os.path.join(HSMR_TEXT_DIR, f"HSMR-{s['seq_id']}.jsonl")
+
     print(f"\nTrain sequences: {len(train_samples)}")
     print(f"Test sequences: {len(test_samples)}")
-    print(f"Train videos: {len(train_videos)}")
-    print(f"Test videos: {len(test_videos)}")
-    print(f"Overlap videos between train/test: {len(train_videos & test_videos)}")
+    _print_label_distribution(train_samples, labels, title="Train label distribution")
+    _print_label_distribution(test_samples, labels, title="Test label distribution")
+    if not ARGS.splits_dir:
+        train_videos = {s["video_id"] for s in train_samples}
+        test_videos = {s["video_id"] for s in test_samples}
+        print(f"Train videos: {len(train_videos)}")
+        print(f"Test videos: {len(test_videos)}")
+        print(f"Overlap videos between train/test: {len(train_videos & test_videos)}")
 
     train_ds = GavdSkeletonDataset(
         train_samples,
         window_size=WINDOW_SIZE,
         train=True,
         with_images=True,
-        video_dir=VIDEO_DIR,
+        video_dir=VIDEO_DIR if not ARGS.splits_dir else BASE_DIR,  # ignored when meta['video_path'] is present
     )
     test_ds = GavdSkeletonDataset(
         test_samples,
         window_size=WINDOW_SIZE,
         train=False,
         with_images=True,
-        video_dir=VIDEO_DIR,
+        video_dir=VIDEO_DIR if not ARGS.splits_dir else BASE_DIR,
     )
 
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
-    return train_loader, test_loader, train_samples
+    return train_loader, test_loader, train_samples, labels
 
 
-def compute_class_weights(train_samples: List[Dict]) -> torch.Tensor:
-    counts = [0] * len(TOP7_LABELS)
+def compute_class_weights(train_samples: List[Dict], labels: List[str]) -> torch.Tensor:
+    counts = [0] * len(labels)
     for s in train_samples:
         counts[s["label_idx"]] += 1
 
     counts_tensor = torch.tensor(counts, dtype=torch.float32)
     counts_tensor = torch.clamp(counts_tensor, min=1.0)
     N = counts_tensor.sum()
-    K = float(len(TOP7_LABELS))
+    K = float(len(labels))
     weights = N / (K * counts_tensor)
     weights = weights / weights.mean()
     print("\nClass weights:", weights.tolist())
     return weights
 
 
-def _load_skeleton_text(seq_id: str, start: int, window_size: int) -> str:
-    path = os.path.join(HSMR_TEXT_DIR, f"HSMR-{seq_id}.jsonl")
-    if not os.path.exists(path):
+def _load_skeleton_text(text_path: str, start: int, window_size: int) -> str:
+    if not isinstance(text_path, str) or text_path.strip() == "" or not os.path.exists(text_path):
         return ""
 
     records = []
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(text_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -136,6 +215,7 @@ def collate_fn(batch, tokenizer, device):
     labels = batch["label"].to(device)
     seq_ids = batch["seq_id"]
     starts = batch["start"]
+    text_paths = batch.get("text_path", [""] * images.size(0))
 
     base_prompt = (
         "You are an expert gait clinician. Based on the available gait information, "
@@ -156,9 +236,9 @@ def collate_fn(batch, tokenizer, device):
     prompts: List[str] = []
     B = images.size(0)
     for i in range(B):
-        seq_id = seq_ids[i]
         start = int(starts[i].item())
-        skel_text = _load_skeleton_text(seq_id, start, WINDOW_SIZE)
+        text_path = text_paths[i] if isinstance(text_paths, list) else ""
+        skel_text = _load_skeleton_text(str(text_path), start, WINDOW_SIZE)
         if skel_text:
             full_prompt = base_prompt + "\n\nSkeleton parameters:\n" + skel_text
         else:
@@ -184,7 +264,7 @@ def evaluate(decoder, language_model, classifier, data_loader, tokenizer, device
     correct = 0
     total = 0
 
-    num_classes = len(TOP7_LABELS)
+    num_classes = len(LABELS)
     tp = [0] * num_classes
     fp = [0] * num_classes
     fn = [0] * num_classes
@@ -242,12 +322,26 @@ def evaluate(decoder, language_model, classifier, data_loader, tokenizer, device
     print(f"Test macro-F1: {macro_f1 * 100:.2f}%")
     print("Per-class F1:")
     for idx, f1 in enumerate(per_class_f1):
-        print(f"  {TOP7_LABELS[idx]}: {f1 * 100:.2f}%")
+        print(f"  {LABELS[idx]}: {f1 * 100:.2f}%")
 
     return acc, macro_f1
 
 
 def main():
+    global ARGS, LABELS
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--splits-dir",
+        type=str,
+        default="",
+        help="If set, loads combined_train.csv/combined_test.csv from this directory to train on GAVD+DCM.",
+    )
+    ARGS = parser.parse_args()
+    if ARGS.splits_dir:
+        ARGS.splits_dir = _resolve(ARGS.splits_dir)
+        if not os.path.isdir(ARGS.splits_dir):
+            raise FileNotFoundError(f"--splits-dir not found: {ARGS.splits_dir}")
+
     tokenizer, base_model, _ = load_model(device=DEVICE)
     language_model = getattr(base_model, "language_model", base_model)
     language_model.requires_grad_(False)
@@ -260,11 +354,11 @@ def main():
     ).to(DEVICE)
 
     hidden_size = decoder.hidden_size
-    num_classes = len(TOP7_LABELS)
+    train_loader, test_loader, train_samples, LABELS = build_dataloaders()
+    num_classes = len(LABELS)
     classifier = nn.Linear(hidden_size, num_classes, dtype=torch.float32).to(DEVICE)
 
-    train_loader, test_loader, train_samples = build_dataloaders()
-    class_weights = compute_class_weights(train_samples).to(DEVICE)
+    class_weights = compute_class_weights(train_samples, labels=LABELS).to(DEVICE)
 
     optimizer = torch.optim.AdamW(
         list(decoder.parameters()) + list(classifier.parameters()),
@@ -385,4 +479,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-k

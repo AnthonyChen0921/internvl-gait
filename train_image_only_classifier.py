@@ -3,9 +3,9 @@ import argparse
 from typing import Dict, List, Tuple
 
 try:
-    import torch
-    from torch import nn
-    from torch.utils.data import DataLoader
+import torch
+from torch import nn
+from torch.utils.data import DataLoader
 except ModuleNotFoundError as e:
     raise ModuleNotFoundError(
         "PyTorch is required to run training. Install it via conda on Windows, e.g.\n"
@@ -109,8 +109,8 @@ def build_dataloaders() -> Tuple[DataLoader, DataLoader, List[Dict], List[str]]:
         test_samples = _load_samples_from_split_csv(test_csv, label_to_idx=label_to_idx)
     else:
         labels = TOP7_LABELS
-        samples = collect_labeled_sequences()
-        train_samples, test_samples = video_level_train_test_split(samples, train_ratio=0.8)
+    samples = collect_labeled_sequences()
+    train_samples, test_samples = video_level_train_test_split(samples, train_ratio=0.8)
 
     # Video-level summary
     print(f"\nTrain sequences: {len(train_samples)}")
@@ -120,9 +120,9 @@ def build_dataloaders() -> Tuple[DataLoader, DataLoader, List[Dict], List[str]]:
     if not ARGS.splits_dir:
         train_videos = {s["video_id"] for s in train_samples}
         test_videos = {s["video_id"] for s in test_samples}
-        print(f"Train videos: {len(train_videos)}")
-        print(f"Test videos: {len(test_videos)}")
-        print(f"Overlap videos between train/test: {len(train_videos & test_videos)}")
+    print(f"Train videos: {len(train_videos)}")
+    print(f"Test videos: {len(test_videos)}")
+    print(f"Overlap videos between train/test: {len(train_videos & test_videos)}")
 
     train_ds = GavdSkeletonDataset(
         train_samples,
