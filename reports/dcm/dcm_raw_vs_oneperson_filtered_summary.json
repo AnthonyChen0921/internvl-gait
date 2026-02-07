@@ -1,0 +1,38 @@
+{
+  "raw_dir": "GAVD-HSMR-dcm",
+  "filtered_dir": "GAVD-HSMR-dcm-oneperson-filtered",
+  "raw_files_total": 258,
+  "filtered_files_total": 239,
+  "raw_only": 19,
+  "both": 239,
+  "T_matches_rate": 1.0,
+  "raw_people_max_value_counts": {
+    "1": 96,
+    "2": 77,
+    "3": 65,
+    "4": 1
+  },
+  "raw_any_2p_frames": 143,
+  "raw_any_3p_plus_frames": 66,
+  "filtered_out_seq_ids_head": [
+    "DCM_21_FastWalkData_1_clip",
+    "DCM_21_FastWalkData_4_clip",
+    "DCM_25_WalkData_1_clip",
+    "DCM_30_FastWalkData_3_clip",
+    "DCM_33_WalkData_3_clip",
+    "DCM_36_FastWalkData_1_clip",
+    "DCM_36_FastWalkData_2_clip",
+    "DCM_36_FastWalkData_5_clip",
+    "DCM_38_WalkData_4_clip",
+    "DCM_44_WalkData_2_clip",
+    "DCM_44_WalkData_5_clip",
+    "DCM_67_FastWalkData_3_clip",
+    "DCM_67_FastWalkData_5_clip",
+    "DCM_82_FastWalkData_1_clip",
+    "DCM_82_FastWalkData_2_clip",
+    "DCM_82_FastWalkData_3_clip",
+    "DCM_86_FastWalkData_1_clip",
+    "DCM_86_FastWalkData_3_clip",
+    "DCM_89_WalkData_4_clip"
+  ]
+}

@@ -1,6 +1,7 @@
 import os
 import json
-from typing import Dict, List
+import argparse
+from typing import Dict, List, Tuple
 
 import torch
 from torch import nn
@@ -30,10 +31,69 @@ HSMR_TEXT_DIR = os.path.join(BASE_DIR, "GAVD-HSMR-text")
 
 STATE_PATH = "evl_framealigned_skeltext_train_state.pt"
 
+ARGS = None
+LABELS: List[str] = []
 
-def build_test_loader():
-    samples = collect_labeled_sequences()
-    _, test_samples = video_level_train_test_split(samples, train_ratio=0.8)
+
+def _resolve(p: str) -> str:
+    p = str(p)
+    if not os.path.isabs(p):
+        p = os.path.join(BASE_DIR, p)
+    return os.path.normpath(p)
+
+
+def _load_samples_from_split_csv(csv_path: str, label_to_idx: Dict[str, int]) -> List[Dict]:
+    """
+    Load samples from a split CSV produced by `make_gavd_plus_dcm_splits.py`.
+    Expected columns (minimum): seq_id,label,skeleton_path,video_path
+    Optional: text_path
+    """
+    import pandas as pd
+
+    df = pd.read_csv(csv_path)
+    required = {"seq_id", "label", "skeleton_path", "video_path"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Split CSV is missing columns {sorted(missing)}: {csv_path}")
+
+    has_text = "text_path" in df.columns
+
+    samples: List[Dict] = []
+    for _, r in df.iterrows():
+        seq_id = str(r["seq_id"])
+        label_str = str(r["label"])
+        if label_str not in label_to_idx:
+            raise ValueError(f"Unknown label {label_str!r} in {csv_path}. Known: {sorted(label_to_idx.keys())}")
+        meta = {
+            "seq_id": seq_id,
+            "path": _resolve(r["skeleton_path"]),
+            "video_path": _resolve(r["video_path"]),
+            "label_str": label_str,
+            "label_idx": int(label_to_idx[label_str]),
+        }
+        if has_text and isinstance(r["text_path"], str) and r["text_path"].strip() != "":
+            meta["text_path"] = _resolve(r["text_path"])
+        samples.append(meta)
+    return samples
+
+
+def build_test_loader() -> DataLoader:
+    assert ARGS is not None
+
+    if ARGS.splits_dir:
+        test_csv = os.path.join(ARGS.splits_dir, "combined_test.csv")
+        labels = TOP7_LABELS + ["dcm"]
+        label_to_idx = {lbl: i for i, lbl in enumerate(labels)}
+        test_samples = _load_samples_from_split_csv(test_csv, label_to_idx=label_to_idx)
+    else:
+        test_samples = None
+
+    if test_samples is None:
+        samples = collect_labeled_sequences()
+        _, test_samples = video_level_train_test_split(samples, train_ratio=0.8, seed=42)
+        # Default GAVD skeleton-text path
+        for s in test_samples:
+            s["text_path"] = os.path.join(HSMR_TEXT_DIR, f"HSMR-{s['seq_id']}.jsonl")
 
     test_ds = GavdSkeletonDataset(
         test_samples,
@@ -46,14 +106,13 @@ def build_test_loader():
     return test_loader
 
 
-def _load_skeleton_text(seq_id: str, start: int, window_size: int) -> str:
-    path = os.path.join(HSMR_TEXT_DIR, f"HSMR-{seq_id}.jsonl")
-    if not os.path.exists(path):
+def _load_skeleton_text(text_path: str, start: int, window_size: int) -> str:
+    if not isinstance(text_path, str) or text_path.strip() == "" or not os.path.exists(text_path):
         return ""
 
     records = []
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(text_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -100,6 +159,7 @@ def collate_fn(batch, tokenizer, device):
     labels = batch["label"].to(device)
     seq_ids = batch["seq_id"]
     starts = batch["start"]
+    text_paths = batch.get("text_path", [""] * images.size(0))
 
     base_prompt = (
         "You are an expert gait clinician. Based on the available gait information, "
@@ -120,9 +180,9 @@ def collate_fn(batch, tokenizer, device):
     prompts: List[str] = []
     B = images.size(0)
     for i in range(B):
-        seq_id = seq_ids[i]
         start = int(starts[i].item())
-        skel_text = _load_skeleton_text(seq_id, start, WINDOW_SIZE)
+        text_path = text_paths[i] if isinstance(text_paths, list) else ""
+        skel_text = _load_skeleton_text(str(text_path), start, WINDOW_SIZE)
         if skel_text:
             full_prompt = base_prompt + "\n\nSkeleton parameters:\n" + skel_text
         else:
@@ -148,7 +208,7 @@ def evaluate(decoder, language_model, classifier, data_loader, tokenizer, device
     correct = 0
     total = 0
 
-    num_classes = len(TOP7_LABELS)
+    num_classes = len(LABELS)
     tp = [0] * num_classes
     fp = [0] * num_classes
     fn = [0] * num_classes
@@ -206,12 +266,26 @@ def evaluate(decoder, language_model, classifier, data_loader, tokenizer, device
     print(f"Test macro-F1: {macro_f1 * 100:.2f}%")
     print("Per-class F1:")
     for idx, f1 in enumerate(per_class_f1):
-        print(f"  {TOP7_LABELS[idx]}: {f1 * 100:.2f}%")
+        print(f"  {LABELS[idx]}: {f1 * 100:.2f}%")
 
     return acc, macro_f1
 
 
 def main():
+    global ARGS, LABELS
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--splits-dir",
+        type=str,
+        default="",
+        help="If set, evaluates on combined_test.csv in this directory (supports GAVD+DCM).",
+    )
+    ARGS = parser.parse_args()
+    if ARGS.splits_dir:
+        ARGS.splits_dir = _resolve(ARGS.splits_dir)
+        if not os.path.isdir(ARGS.splits_dir):
+            raise FileNotFoundError(f"--splits-dir not found: {ARGS.splits_dir}")
+
     if not os.path.exists(STATE_PATH):
         raise FileNotFoundError(
             f"{STATE_PATH} not found. Run train_evl_framealigned_skeltext_classifier.py first."
@@ -229,6 +303,7 @@ def main():
     ).to(DEVICE)
 
     hidden_size = decoder.hidden_size
+    # Infer classifier output size from training state (so eval matches the trained model).
     num_classes = len(TOP7_LABELS)
     classifier = nn.Linear(hidden_size, num_classes, dtype=torch.float32).to(DEVICE)
 
@@ -239,6 +314,23 @@ def main():
         f"Loaded training state from {STATE_PATH}: "
         f"epoch={state.get('epoch')}, best_macro_f1={state.get('best_macro_f1', 0.0)*100:.2f}%"
     )
+
+    trained_num_classes = int(classifier.weight.shape[0])
+    if trained_num_classes == len(TOP7_LABELS):
+        LABELS = TOP7_LABELS
+    elif trained_num_classes == len(TOP7_LABELS) + 1:
+        LABELS = TOP7_LABELS + ["dcm"]
+    else:
+        raise ValueError(
+            f"Unexpected classifier output size {trained_num_classes}. "
+            f"Expected {len(TOP7_LABELS)} (GAVD-only) or {len(TOP7_LABELS)+1} (GAVD+DCM)."
+        )
+
+    if ARGS.splits_dir and "dcm" in (set(TOP7_LABELS + ["dcm"]) - set(LABELS)):
+        raise ValueError(
+            "You passed --splits-dir (combined eval) but the loaded model appears to be GAVD-only (7 classes). "
+            "Either retrain the skeltext model with DCM included (8 classes) or evaluate without --splits-dir."
+        )
 
     test_loader = build_test_loader()
     evaluate(decoder, language_model, classifier, test_loader, tokenizer, DEVICE)
