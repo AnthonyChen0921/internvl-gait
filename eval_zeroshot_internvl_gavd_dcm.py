@@ -123,8 +123,9 @@ def build_prompt(labels: List[str]) -> str:
         "- cerebral palsy: spastic, scissoring, toe-walking, or crouched gait typical of cerebral palsy.\n"
         "- parkinsons: shuffling, stooped posture, reduced arm swing, and festination typical of Parkinson's disease.\n"
         "- dcm: dilated cardiomyopathy or related DCM gait patterns.\n\n"
-        "Reply with exactly one class name from this list: "
-        f"{', '.join(labels)}."
+        "Answer with a single label from this list only: "
+        f"{', '.join(labels)}.\n"
+        "Label:"
     )
     return prompt
 
@@ -171,6 +172,8 @@ def _inject_visual_tokens(model, tokenizer, pixel_values: torch.Tensor, prompt: 
 
 def _normalize_label(text: str, labels: List[str]) -> str:
     clean = text.lower().strip()
+    if "label:" in clean:
+        clean = clean.split("label:", 1)[1].strip()
     aliases = {
         "parkinson": "parkinsons",
         "parkinson's": "parkinsons",
@@ -204,7 +207,7 @@ def predict_label(model, tokenizer, images: torch.Tensor, labels: List[str]) -> 
     output_ids = language_model.generate(
         inputs_embeds=inputs_embeds,
         attention_mask=attention_mask,
-        max_new_tokens=8,
+        max_new_tokens=ARGS.max_new_tokens,
         do_sample=False,
         eos_token_id=tokenizer.eos_token_id,
         pad_token_id=tokenizer.eos_token_id,
@@ -238,7 +241,7 @@ def evaluate(model, tokenizer, data_loader, labels: List[str], title: str):
             print(f"raw_output: {raw_text}")
             print(f"pred_label: {pred_label if pred_label else 'N/A'} | true_label: {true_label}")
         if pred_label == "":
-            pred_label = labels[0]
+            pred_label = ARGS.fallback_label
 
         pred_idx = label_to_idx[pred_label]
         true_idx = label_to_idx[true_label]
@@ -287,6 +290,18 @@ def main():
         "--print-output",
         action="store_true",
         help="Print raw model output and parsed label for each sample.",
+    )
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=32,
+        help="Max new tokens for zero-shot label generation.",
+    )
+    parser.add_argument(
+        "--fallback-label",
+        type=str,
+        default="abnormal",
+        help="Label to use when parsing fails.",
     )
     ARGS = parser.parse_args()
     ARGS.splits_dir = _resolve(ARGS.splits_dir)
