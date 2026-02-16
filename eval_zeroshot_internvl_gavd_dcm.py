@@ -192,6 +192,48 @@ def _normalize_label(text: str, labels: List[str]) -> str:
 
 
 @torch.no_grad()
+def _label_token_ids(tokenizer, label: str) -> torch.Tensor:
+    label_text = " " + label
+    enc = tokenizer(label_text, add_special_tokens=False, return_tensors="pt")
+    label_ids = enc["input_ids"]
+    if label_ids.numel() == 0:
+        label_ids = tokenizer(label, add_special_tokens=False, return_tensors="pt")["input_ids"]
+    return label_ids
+
+
+@torch.no_grad()
+def _score_labels(model, tokenizer, prompt_embeds, prompt_mask, labels: List[str]) -> Dict[str, float]:
+    language_model = getattr(model, "language_model", model)
+    scores: Dict[str, float] = {}
+
+    prompt_len = prompt_embeds.size(1)
+    for label in labels:
+        label_ids = _label_token_ids(tokenizer, label).to(DEVICE)
+        label_len = label_ids.size(1)
+        label_embeds = language_model.get_input_embeddings()(label_ids)
+
+        inputs_embeds = torch.cat([prompt_embeds, label_embeds], dim=1)
+        label_mask = torch.ones(1, label_len, dtype=prompt_mask.dtype, device=prompt_mask.device)
+        attention_mask = torch.cat([prompt_mask, label_mask], dim=1)
+
+        outputs = language_model(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            return_dict=True,
+        )
+        logits = outputs.logits  # [1, seq_len, vocab]
+        log_probs = torch.log_softmax(logits, dim=-1)
+
+        total = 0.0
+        for i in range(label_len):
+            pos = prompt_len - 1 + i
+            token_id = int(label_ids[0, i].item())
+            total += float(log_probs[0, pos, token_id].item())
+        scores[label] = total / max(1, label_len)
+    return scores
+
+
+@torch.no_grad()
 def predict_label(model, tokenizer, images: torch.Tensor, labels: List[str]) -> Tuple[str, str]:
     pixel_values = images.squeeze(0)
     try:
@@ -204,17 +246,21 @@ def predict_label(model, tokenizer, images: torch.Tensor, labels: List[str]) -> 
     inputs_embeds, attention_mask = _inject_visual_tokens(model, tokenizer, pixel_values, prompt)
     language_model = getattr(model, "language_model", model)
 
-    output_ids = language_model.generate(
-        inputs_embeds=inputs_embeds,
-        attention_mask=attention_mask,
-        max_new_tokens=ARGS.max_new_tokens,
-        do_sample=False,
-        eos_token_id=tokenizer.eos_token_id,
-        pad_token_id=tokenizer.eos_token_id,
-    )
-    text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-    pred = _normalize_label(text, labels)
-    return pred, text
+    scores = _score_labels(model, tokenizer, inputs_embeds, attention_mask, labels)
+    pred = max(scores, key=scores.get) if scores else ""
+
+    raw_text = ""
+    if ARGS.print_output:
+        output_ids = language_model.generate(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            max_new_tokens=ARGS.max_new_tokens,
+            do_sample=False,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+        raw_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+    return pred, raw_text
 
 
 def evaluate(model, tokenizer, data_loader, labels: List[str], title: str):
