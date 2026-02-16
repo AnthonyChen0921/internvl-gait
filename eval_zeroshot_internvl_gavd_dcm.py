@@ -189,7 +189,7 @@ def _normalize_label(text: str, labels: List[str]) -> str:
 
 
 @torch.no_grad()
-def predict_label(model, tokenizer, images: torch.Tensor, labels: List[str]) -> str:
+def predict_label(model, tokenizer, images: torch.Tensor, labels: List[str]) -> Tuple[str, str]:
     pixel_values = images.squeeze(0)
     try:
         model_dtype = next(model.parameters()).dtype
@@ -211,7 +211,7 @@ def predict_label(model, tokenizer, images: torch.Tensor, labels: List[str]) -> 
     )
     text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
     pred = _normalize_label(text, labels)
-    return pred
+    return pred, text
 
 
 def evaluate(model, tokenizer, data_loader, labels: List[str], title: str):
@@ -231,7 +231,12 @@ def evaluate(model, tokenizer, data_loader, labels: List[str], title: str):
             true_idx = int(batch["label"][0].item())
             true_label = labels[true_idx]
 
-        pred_label = predict_label(model, tokenizer, images, labels)
+        pred_label, raw_text = predict_label(model, tokenizer, images, labels)
+        if ARGS.print_output:
+            seq_id = batch["seq_id"][0] if "seq_id" in batch else "unknown"
+            print(f"\n[{title}] seq_id={seq_id}")
+            print(f"raw_output: {raw_text}")
+            print(f"pred_label: {pred_label if pred_label else 'N/A'} | true_label: {true_label}")
         if pred_label == "":
             pred_label = labels[0]
 
@@ -277,6 +282,11 @@ def main():
         type=str,
         required=True,
         help="Directory containing combined_train.csv and combined_test.csv.",
+    )
+    parser.add_argument(
+        "--print-output",
+        action="store_true",
+        help="Print raw model output and parsed label for each sample.",
     )
     ARGS = parser.parse_args()
     ARGS.splits_dir = _resolve(ARGS.splits_dir)
