@@ -19,6 +19,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_DIR = os.path.join(BASE_DIR, "GAVD-sequences")
 
 ARGS = None
+VISION_CACHE: Dict[str, torch.Tensor] = {}
 
 
 def _resolve(p: str) -> str:
@@ -130,7 +131,7 @@ def build_prompt(labels: List[str]) -> str:
     return prompt
 
 
-def _inject_visual_tokens(model, tokenizer, pixel_values: torch.Tensor, prompt: str):
+def _inject_visual_tokens(model, tokenizer, pixel_values: torch.Tensor, prompt: str, vit_embeds: torch.Tensor):
     """
     Build input embeddings by inserting visual tokens at IMG_CONTEXT positions.
     """
@@ -151,7 +152,7 @@ def _inject_visual_tokens(model, tokenizer, pixel_values: torch.Tensor, prompt: 
 
     img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
 
-    vit_embeds = model.extract_feature(pixel_values)  # [num_frames, T_v, D]
+    # vit_embeds provided by caller (optionally cached)
     language_model = getattr(model, "language_model", model)
     input_embeds = language_model.get_input_embeddings()(input_ids)
 
@@ -168,6 +169,17 @@ def _inject_visual_tokens(model, tokenizer, pixel_values: torch.Tensor, prompt: 
 
     input_embeds = input_embeds.reshape(B, N, C)
     return input_embeds, attention_mask
+
+
+def _get_vit_embeds(model, pixel_values: torch.Tensor, cache_key: str) -> torch.Tensor:
+    if ARGS.cache_vision and cache_key in VISION_CACHE:
+        cached = VISION_CACHE[cache_key]
+        return cached.to(device=pixel_values.device, dtype=pixel_values.dtype)
+
+    vit_embeds = model.extract_feature(pixel_values)  # [num_frames, T_v, D]
+    if ARGS.cache_vision:
+        VISION_CACHE[cache_key] = vit_embeds.detach().cpu()
+    return vit_embeds
 
 
 def _normalize_label(text: str, labels: List[str]) -> str:
@@ -234,7 +246,9 @@ def _score_labels(model, tokenizer, prompt_embeds, prompt_mask, labels: List[str
 
 
 @torch.no_grad()
-def predict_label(model, tokenizer, images: torch.Tensor, labels: List[str]) -> Tuple[str, str]:
+def predict_label(model, tokenizer, batch: Dict, labels: List[str]) -> Tuple[str, str]:
+    images = batch["images"]
+    seq_id = batch["seq_id"][0] if "seq_id" in batch else "unknown"
     pixel_values = images.squeeze(0)
     try:
         model_dtype = next(model.parameters()).dtype
@@ -243,14 +257,11 @@ def predict_label(model, tokenizer, images: torch.Tensor, labels: List[str]) -> 
     pixel_values = pixel_values.to(device=DEVICE, dtype=model_dtype)
 
     prompt = build_prompt(labels)
-    inputs_embeds, attention_mask = _inject_visual_tokens(model, tokenizer, pixel_values, prompt)
+    vit_embeds = _get_vit_embeds(model, pixel_values, cache_key=str(seq_id))
+    inputs_embeds, attention_mask = _inject_visual_tokens(model, tokenizer, pixel_values, prompt, vit_embeds)
     language_model = getattr(model, "language_model", model)
 
-    scores = _score_labels(model, tokenizer, inputs_embeds, attention_mask, labels)
-    pred = max(scores, key=scores.get) if scores else ""
-
-    raw_text = pred
-    if ARGS.print_output and ARGS.show_generation:
+    if ARGS.mode == "freeform":
         output_ids = language_model.generate(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
@@ -260,6 +271,12 @@ def predict_label(model, tokenizer, images: torch.Tensor, labels: List[str]) -> 
             pad_token_id=tokenizer.eos_token_id,
         )
         raw_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+        pred = _normalize_label(raw_text, labels)
+        return pred, raw_text
+
+    scores = _score_labels(model, tokenizer, inputs_embeds, attention_mask, labels)
+    pred = max(scores, key=scores.get) if scores else ""
+    raw_text = pred if ARGS.print_output else ""
     return pred, raw_text
 
 
@@ -280,7 +297,7 @@ def evaluate(model, tokenizer, data_loader, labels: List[str], title: str):
             true_idx = int(batch["label"][0].item())
             true_label = labels[true_idx]
 
-        pred_label, raw_text = predict_label(model, tokenizer, images, labels)
+        pred_label, raw_text = predict_label(model, tokenizer, batch, labels)
         if ARGS.print_output:
             seq_id = batch["seq_id"][0] if "seq_id" in batch else "unknown"
             print(f"\n[{title}] seq_id={seq_id}")
@@ -344,9 +361,16 @@ def main():
         help="Max new tokens for zero-shot label generation.",
     )
     parser.add_argument(
-        "--show-generation",
+        "--mode",
+        type=str,
+        default="freeform",
+        choices=["freeform", "score"],
+        help="Prediction mode: freeform single-pass or log-prob scoring.",
+    )
+    parser.add_argument(
+        "--cache-vision",
         action="store_true",
-        help="If set with --print-output, also run free-form generation for debugging.",
+        help="Cache vision embeddings by seq_id to speed up repeated evaluation.",
     )
     parser.add_argument(
         "--fallback-label",
