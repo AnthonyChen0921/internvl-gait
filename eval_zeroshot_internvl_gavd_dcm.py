@@ -249,8 +249,8 @@ def predict_label(model, tokenizer, images: torch.Tensor, labels: List[str]) -> 
     scores = _score_labels(model, tokenizer, inputs_embeds, attention_mask, labels)
     pred = max(scores, key=scores.get) if scores else ""
 
-    raw_text = ""
-    if ARGS.print_output:
+    raw_text = pred
+    if ARGS.print_output and ARGS.show_generation:
         output_ids = language_model.generate(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
@@ -342,6 +342,11 @@ def main():
         type=int,
         default=32,
         help="Max new tokens for zero-shot label generation.",
+    )
+    parser.add_argument(
+        "--show-generation",
+        action="store_true",
+        help="If set with --print-output, also run free-form generation for debugging.",
     )
     parser.add_argument(
         "--fallback-label",
