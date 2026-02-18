@@ -115,18 +115,9 @@ def build_prompt(labels: List[str]) -> str:
     prompt = (
         "You are an expert gait clinician. Based on the available gait information, "
         "classify the patient's gait pattern.\n\n"
-        "Gait pattern definitions:\n"
-        "- abnormal: any gait pattern that deviates from normal but does not fit the specific patterns below.\n"
-        "- myopathic: waddling or Trendelenburg-type gait due to proximal muscle weakness.\n"
-        "- exercise: exaggerated, energetic, or performance-like gait related to sport or exercise.\n"
-        "- normal: typical, symmetric gait without obvious abnormalities.\n"
-        "- style: exaggerated or stylistic walking pattern without clear neurological or orthopedic cause.\n"
-        "- cerebral palsy: spastic, scissoring, toe-walking, or crouched gait typical of cerebral palsy.\n"
-        "- parkinsons: shuffling, stooped posture, reduced arm swing, and festination typical of Parkinson's disease.\n"
-        "- dcm: dilated cardiomyopathy or related DCM gait patterns.\n\n"
         "Answer with a single label from this list only: "
         f"{', '.join(labels)}.\n"
-        "Label:"
+        "According to the video and class labels, the most likely label is:"
     )
     return prompt
 
@@ -271,6 +262,7 @@ def predict_label(model, tokenizer, batch: Dict, labels: List[str]) -> Tuple[str
             pad_token_id=tokenizer.eos_token_id,
         )
         raw_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+        print(raw_text)
         pred = _normalize_label(raw_text, labels)
         return pred, raw_text
 

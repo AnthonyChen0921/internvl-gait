@@ -231,11 +231,12 @@ def _build_classification_prompts(batch) -> List[str]:
 
 
 def _build_report_prompt(label: str) -> str:
+    # NOTE: Kept for backward-compatibility if needed elsewhere.
     return (
-        "You are a clinical assistant. I have already analyzed the visual features and "
-        f"identified the condition as {label}.\n"
-        "Please generate a detailed clinical report that supports this diagnosis. "
-        f"Focus on describing observations and evidence that explain why this is {label}."
+        "You are a clinical gait specialist.\n"
+        f"The overall gait classification for this sequence is: {label}.\n"
+        "Write a concise clinical report explaining why this gait is classified as "
+        f"{label}, focusing only on gait and movement.\n"
     )
 
 
@@ -286,8 +287,68 @@ def _predict_labels(decoder, language_model, classifier, tokenizer, batch, devic
     return preds
 
 
-def _generate_reports(language_model, tokenizer, labels: List[str], preds: torch.Tensor) -> List[str]:
-    prompts = [_build_report_prompt(labels[int(p.item())]) for p in preds]
+def _build_video_conditioned_prompt(label: str, skel_summary: str) -> str:
+    """
+    Build a gait-focused prompt that explicitly mentions the predicted label and
+    optionally summarizes skeleton-derived observations.
+    """
+    base = (
+        "You are a clinical gait specialist.\n"
+        "You are analyzing a video of a patient walking, together with 3D skeleton parameters.\n"
+        f"The overall gait classification for this sequence is: {label}.\n\n"
+        "Write a concise clinical gait report that explains WHY this gait is classified as "
+        f"{label}. Focus only on gait and movement (do NOT discuss eyes, visual fields, or unrelated systems).\n"
+        "Describe:\n"
+        "- Key gait abnormalities you would expect to see in the video\n"
+        "- How step length, symmetry, arm swing, posture, and cadence are affected\n"
+        "- How these findings are typical for the class "
+        f"{label}.\n"
+    )
+    if skel_summary:
+        base += (
+            "\nUse the following skeleton-derived observations as evidence (paraphrase them, do not copy verbatim):\n"
+            f"{skel_summary}\n"
+        )
+    return base
+
+
+def _generate_reports(
+    decoder,
+    language_model,
+    tokenizer,
+    labels: List[str],
+    preds: torch.Tensor,
+    batch,
+    device,
+) -> List[str]:
+    """
+    Generate gait reports conditioned on:
+      - EVL frame tokens from the 32-frame video window,
+      - the predicted gait label,
+      - per-frame skeleton text (if available),
+      - and a text prompt.
+
+    We prefix the text prompt with frame tokens (video prefix) and then let the LLM generate.
+    """
+    images = batch["images"].to(device)
+    seq_ids = batch["seq_id"]
+    starts = batch["start"]
+    text_paths = batch.get("text_path", [""] * len(seq_ids))
+
+    # 1) Build skeleton summaries aligned with the current window.
+    skel_summaries: List[str] = []
+    for i in range(len(seq_ids)):
+        text_path = text_paths[i] if isinstance(text_paths, list) else ""
+        skel_text = _load_skeleton_text(str(text_path), int(starts[i].item()), WINDOW_SIZE)
+        skel_summaries.append(skel_text)
+
+    # 2) Build label-aware, gait-focused text prompts.
+    prompts: List[str] = []
+    for i, p in enumerate(preds):
+        label_str = labels[int(p.item())]
+        prompts.append(_build_video_conditioned_prompt(label_str, skel_summaries[i]))
+
+    # 3) Encode prompts to embeddings.
     enc = tokenizer(
         prompts,
         return_tensors="pt",
@@ -295,8 +356,20 @@ def _generate_reports(language_model, tokenizer, labels: List[str], preds: torch
         truncation=True,
         max_length=MAX_TEXT_TOKENS,
     )
-    input_ids = enc["input_ids"].to(DEVICE)
-    attention_mask = enc["attention_mask"].to(DEVICE)
+    input_ids = enc["input_ids"].to(device)
+    attention_mask = enc["attention_mask"].to(device)
+
+    text_embeds = language_model.get_input_embeddings()(input_ids)  # [B, L, D]
+
+    # 4) Get per-frame video tokens from the EVL decoder and prepend them as a prefix.
+    frame_tokens = decoder(pixel_values=images)  # [B, T, D]
+    frame_tokens = frame_tokens.to(dtype=text_embeds.dtype)
+
+    B, T, _ = frame_tokens.shape
+    video_mask = torch.ones(B, T, dtype=attention_mask.dtype, device=device)
+
+    inputs_embeds = torch.cat([frame_tokens, text_embeds], dim=1)  # [B, T+L, D]
+    fused_mask = torch.cat([video_mask, attention_mask], dim=1)  # [B, T+L]
 
     gen_kwargs = {
         "max_new_tokens": ARGS.max_new_tokens,
@@ -307,21 +380,17 @@ def _generate_reports(language_model, tokenizer, labels: List[str], preds: torch
         "pad_token_id": tokenizer.eos_token_id,
     }
 
-    outputs = language_model.generate(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        **gen_kwargs,
-    )
+    with torch.no_grad():
+        outputs = language_model.generate(
+            inputs_embeds=inputs_embeds,
+            attention_mask=fused_mask,
+            **gen_kwargs,
+        )
 
     reports: List[str] = []
-    for i, out_ids in enumerate(outputs):
+    for out_ids in outputs:
         full_text = tokenizer.decode(out_ids, skip_special_tokens=True)
-        prompt = prompts[i]
-        if full_text.startswith(prompt):
-            report = full_text[len(prompt) :].strip()
-        else:
-            report = full_text.strip()
-        reports.append(report)
+        reports.append(full_text.strip())
     return reports
 
 
@@ -414,7 +483,7 @@ def main():
     with open(output_path, "w", encoding="utf-8") as f:
         for batch in tqdm(data_loader, desc=f"Generating reports ({ARGS.split})"):
             preds = _predict_labels(decoder, language_model, classifier, tokenizer, batch, DEVICE)
-            reports = _generate_reports(language_model, tokenizer, LABELS, preds)
+            reports = _generate_reports(decoder, language_model, tokenizer, LABELS, preds, batch, DEVICE)
 
             seq_ids = batch["seq_id"]
             labels = batch["label"]
