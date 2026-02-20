@@ -1,0 +1,63 @@
+{
+  "file": "HSMR-DCM_77_FastWalkData_4_clip.npy",
+  "status": "ok",
+  "num_frames": 113,
+  "fps": 30.0,
+  "events": {
+    "HS_L": [
+      24,
+      49,
+      73,
+      99,
+      112
+    ],
+    "HS_R": [
+      23,
+      47,
+      72,
+      86,
+      112
+    ],
+    "TO_L_by_stride": [
+      28,
+      58,
+      85,
+      101
+    ],
+    "TO_R_by_stride": [
+      27,
+      51,
+      74,
+      98
+    ],
+    "counts": {
+      "HS_L": 5,
+      "HS_R": 5,
+      "TO_L_valid": 4,
+      "TO_R_valid": 4,
+      "left_stance_intervals": 4,
+      "right_stance_intervals": 4
+    }
+  },
+  "metrics": {
+    "steps_per_minute": 202.247191,
+    "step_duration_diff_L_minus_R": 0.05,
+    "walk_cycle_time_diff_L_minus_R": 0.0,
+    "right_step_time": 0.6,
+    "left_step_time": 0.65,
+    "left_stride_time": 0.833333,
+    "right_stride_time": 0.833333,
+    "left_swing_percent": 66.782051,
+    "right_swing_percent": 73.726496,
+    "left_swing_time": 0.555556,
+    "right_swing_time": 0.611111,
+    "left_only_support_percent_within_left_stride": 25.15812,
+    "right_only_support_percent_within_right_stride": 19.440171,
+    "left_only_support_duration_within_left_stride": 0.211111,
+    "right_only_support_duration_within_right_stride": 0.166667,
+    "double_support_percent_within_left_stride": 8.059829,
+    "double_support_percent_within_right_stride": 6.833333,
+    "double_support_duration_within_left_stride": 0.066667,
+    "double_support_duration_within_right_stride": 0.055556
+  }
+}

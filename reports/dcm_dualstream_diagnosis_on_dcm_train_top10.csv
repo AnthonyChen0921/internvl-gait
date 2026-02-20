@@ -1,0 +1,51 @@
+seq_id,true_label,pred_label,is_correct_label,is_pred_dcm,logit_dcm,prob_dcm,pred_confidence,top3_probs,gait_json_path,text_path,diagnosis_class_extracted,diagnosis_matches_pred,diagnosis_matches_truth,diagnosis
+DCM_20_FastWalkData_1_clip,dcm,dcm,1,1,12.181564331054688,0.9999964237213135,0.9999964237213135,"dcm:1.0000, cerebral palsy:0.0000, normal:0.0000",C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\gait_parameter_results\HSMR-DCM_20_FastWalkData_1_clip.gait.json,C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\GAVD-HSMR-dcm-text-oneperson-filtered\HSMR-DCM_20_FastWalkData_1_clip.jsonl,dcm,1,1,"1) Final diagnosis class: dcm
+
+2) Rationale: The individual exhibits a slow walking pattern with a low step duration and a noticeable swing in the left leg, which are indicative of a possible dcm. The slow pace and inconsistent support distribution suggest difficulties in maintaining proper gait mechanics, which are characteristic of dcm. The presence of a treadmill and exercise equipment in the background further supports the setting of a fitness environment, but the specific gait parameters indicate potential motor control issues.
+
+3) Confidence statement: 1.0000"
+DCM_20_FastWalkData_2_clip,dcm,dcm,1,1,12.310832023620605,0.9999978542327881,0.9999978542327881,"dcm:1.0000, normal:0.0000, cerebral palsy:0.0000",C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\gait_parameter_results\HSMR-DCM_20_FastWalkData_2_clip.gait.json,C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\GAVD-HSMR-dcm-text-oneperson-filtered\HSMR-DCM_20_FastWalkData_2_clip.jsonl,dcm,1,1,"1) Final diagnosis class: dcm
+
+2) Rationale: The individual exhibits a slow walking pace (steps per minute: 233.33) and a noticeable difference in step durations between the left and right legs (left step time: 0.45, right step time: 0.43). The right leg shows a higher swing percentage (84.90%) compared to the left leg (0%). These gait parameters suggest a possible impairment in balance and coordination, which are common indicators of a diagnosis of Down's syndrome (DCM). The slow walking speed and inconsistent leg support patterns further support this interpretation.
+
+3) Confidence statement: 1.0000"
+DCM_20_FastWalkData_3_clip,dcm,dcm,1,1,12.925677299499512,0.9999985694885254,0.9999985694885254,"dcm:1.0000, cerebral palsy:0.0000, normal:0.0000",C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\gait_parameter_results\HSMR-DCM_20_FastWalkData_3_clip.gait.json,C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\GAVD-HSMR-dcm-text-oneperson-filtered\HSMR-DCM_20_FastWalkData_3_clip.jsonl,dcm,1,1,"1) Final diagnosis class: dcm
+
+2) Rationale: The individual exhibits a slow walking pattern with a low step duration and a reduced swing percentage, indicating a possible limitation in gait efficiency. The presence of a treadmill and exercise equipment suggests an environment designed for physical activity, which may not fully support the individual's gait. The slow walking speed and inconsistent stance intervals could suggest a need for further evaluation to identify any underlying motor or neurological issues.
+
+3) Confidence statement: 1.0000"
+DCM_20_FastWalkData_4_clip,dcm,dcm,1,1,11.98493766784668,0.9999959468841553,0.9999959468841553,"dcm:1.0000, cerebral palsy:0.0000, normal:0.0000",C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\gait_parameter_results\HSMR-DCM_20_FastWalkData_4_clip.gait.json,C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\GAVD-HSMR-dcm-text-oneperson-filtered\HSMR-DCM_20_FastWalkData_4_clip.jsonl,dcm,1,1,"1) Final diagnosis class: dcm
+
+2) Rationale: The individual exhibits a pattern of uneven weight distribution and inconsistent stride lengths, which are indicative of a possible diagnosis of dcm. The lack of clear support during the left stride and the inconsistent step duration suggest instability and imbalance, common in dcm. The presence of a treadmill and other exercise equipment in the background indicates a setting designed for physical activity, which may be related to the individual's exercise routine. 
+
+3) Confidence statement: 1.0000"
+DCM_20_FastWalkData_5_clip,dcm,dcm,1,1,10.73643684387207,0.9999756813049316,0.9999756813049316,"dcm:1.0000, normal:0.0000, exercise:0.0000",C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\gait_parameter_results\HSMR-DCM_20_FastWalkData_5_clip.gait.json,C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\GAVD-HSMR-dcm-text-oneperson-filtered\HSMR-DCM_20_FastWalkData_5_clip.jsonl,dcm,1,1,"1) Final diagnosis class: dcm
+
+2) Rationale: The individual is performing a walking exercise on a mat, which is consistent with a dynamic core movement pattern. The presence of exercise equipment in the background suggests a fitness environment. The gait parameters indicate a balanced stride pattern with a moderate step duration and swing percentages, which aligns with a healthy, active walking pattern rather than a normal walking pattern. The overall gait appears to be stable and controlled, indicating a possible focus on balance and movement efficiency.
+
+3) Confidence statement: 1.0000"
+DCM_20_WalkData_1_clip,dcm,dcm,1,1,13.65965747833252,0.9999995231628418,0.9999995231628418,"dcm:1.0000, cerebral palsy:0.0000, normal:0.0000",C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\gait_parameter_results\HSMR-DCM_20_WalkData_1_clip.gait.json,C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\GAVD-HSMR-dcm-text-oneperson-filtered\HSMR-DCM_20_WalkData_1_clip.jsonl,dcm,1,1,"1) Final diagnosis class: dcm
+
+2) Rationale: The individual exhibits a gait pattern characterized by a prolonged left swing and reduced support during the left stride, along with a longer right swing and support. These gait parameters suggest a possible impairment in balance and coordination, which are common indicators of a diagnosis of dcm (disorganized movement pattern). The presence of a single left foot in the frame and the overall asymmetry in gait support further support this interpretation.
+
+3) Confidence statement: 1.0000"
+DCM_20_WalkData_2_clip,dcm,dcm,1,1,13.713251113891602,0.999998927116394,0.999998927116394,"dcm:1.0000, cerebral palsy:0.0000, exercise:0.0000",C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\gait_parameter_results\HSMR-DCM_20_WalkData_2_clip.gait.json,C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\GAVD-HSMR-dcm-text-oneperson-filtered\HSMR-DCM_20_WalkData_2_clip.jsonl,dcm,1,1,"1) Final diagnosis class: dcm
+
+2) Rationale: The individual exhibits a gait pattern characterized by a reduced left swing percentage and increased right swing percentage, indicating a possible imbalance in the swing phase. The left stride support is lower compared to the right, suggesting a possible weakness or imbalance in the left leg. Additionally, the step duration and timing differences between the left and right legs may indicate an imbalance in the gait cycle. These observations, combined with the overall gait parameters, suggest a diagnosis of dcm.
+
+3) Confidence statement: 1.0000"
+DCM_20_WalkData_3_clip,dcm,dcm,1,1,13.269521713256836,0.9999984502792358,0.9999984502792358,"dcm:1.0000, cerebral palsy:0.0000, exercise:0.0000",C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\gait_parameter_results\HSMR-DCM_20_WalkData_3_clip.gait.json,C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\GAVD-HSMR-dcm-text-oneperson-filtered\HSMR-DCM_20_WalkData_3_clip.jsonl,dcm,1,1,"1) Final diagnosis class: dcm
+
+2) Rationale: The individual exhibits a gait pattern characterized by a wide stance and a lack of balance, which is indicative of a possible dcm. The wide stance and uneven weight distribution suggest difficulties in maintaining proper balance and coordination, which are common in dcm. Additionally, the presence of a treadmill and other exercise equipment in the background suggests an environment designed for physical activity, which may be associated with other conditions. The lack of clear support structures and the individual's reliance on their own balance further supports the diagnosis of dcm.
+
+3) Confidence statement: 1.0000"
+DCM_20_WalkData_4_clip,dcm,dcm,1,1,13.671391487121582,0.9999992847442627,0.9999992847442627,"dcm:1.0000, cerebral palsy:0.0000, abnormal:0.0000",C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\gait_parameter_results\HSMR-DCM_20_WalkData_4_clip.gait.json,C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\GAVD-HSMR-dcm-text-oneperson-filtered\HSMR-DCM_20_WalkData_4_clip.jsonl,dcm,1,1,"1) Final diagnosis class: dcm
+
+2) Rationale: The individual exhibits a gait pattern characterized by a wide left swing and a significant left only support percentage, which suggests a possible abnormality. The presence of a wide left swing and the lack of clear right support further supports the diagnosis of a dcm. The individual's gait appears to involve a lack of proper balance and coordination, which are common in conditions like cerebral palsy.
+
+3) Confidence statement: 1.0000"
+DCM_20_WalkData_5_clip,dcm,dcm,1,1,12.969157218933105,0.9999988079071045,0.9999988079071045,"dcm:1.0000, normal:0.0000, cerebral palsy:0.0000",C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\gait_parameter_results\HSMR-DCM_20_WalkData_5_clip.gait.json,C:\Users\1nkas-Strix-4090-ll\Desktop\InternVL\GAVD-HSMR-dcm-text-oneperson-filtered\HSMR-DCM_20_WalkData_5_clip.jsonl,dcm,1,1,"1) Final diagnosis class: dcm
+
+2) Rationale: The individual exhibits a gait pattern characterized by a prolonged left swing and a reduced support percentage within the left stride, which are indicative of potential motor control issues. The inconsistent stride lengths and timing suggest abnormal gait mechanics, consistent with a diagnosis of dcm. The presence of a treadmill and exercise equipment in the background further supports the setting of a fitness environment, which may be associated with the individual's physical condition.
+
+3) Confidence statement: 1.0000"

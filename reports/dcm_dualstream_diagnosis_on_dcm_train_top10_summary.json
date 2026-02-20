@@ -1,0 +1,9 @@
+{
+  "split_csv": "C:\\Users\\1nkas-Strix-4090-ll\\Desktop\\InternVL\\splits\\gavd_plus_dcm_singlelabel_legacygavd\\dcm_train.csv",
+  "checkpoint": "C:\\Users\\1nkas-Strix-4090-ll\\Desktop\\InternVL\\best_evl_dualstream_skeltext_classifier.pt",
+  "num_samples": 10,
+  "classification_accuracy": 1.0,
+  "predicted_as_dcm_ratio": 1.0,
+  "all_gt_are_dcm_expected": true,
+  "output_csv": "C:\\Users\\1nkas-Strix-4090-ll\\Desktop\\InternVL\\reports\\dcm_dualstream_diagnosis_on_dcm_train_top10.csv"
+}
